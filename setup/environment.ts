@@ -1,6 +1,6 @@
 /**
- * Step: environment — Detect OS, Node, container runtimes, existing config.
- * Replaces 01-check-environment.sh
+ * ステップ: environment — OS, Node, コンテナランタイム, 既存の設定を検出します。
+ * 01-check-environment.sh を置き換えるものです。
  */
 import fs from 'fs';
 import path from 'path';
@@ -15,19 +15,19 @@ import { emitStatus } from './status.js';
 export async function run(_args: string[]): Promise<void> {
   const projectRoot = process.cwd();
 
-  logger.info('Starting environment check');
+  logger.info('環境チェックを開始します');
 
   const platform = getPlatform();
   const wsl = isWSL();
   const headless = isHeadless();
 
-  // Check Apple Container
+  // Apple Container を確認
   let appleContainer: 'installed' | 'not_found' = 'not_found';
   if (commandExists('container')) {
     appleContainer = 'installed';
   }
 
-  // Check Docker
+  // Docker を確認
   let docker: 'running' | 'installed_not_running' | 'not_found' = 'not_found';
   if (commandExists('docker')) {
     try {
@@ -39,18 +39,18 @@ export async function run(_args: string[]): Promise<void> {
     }
   }
 
-  // Check existing config
+  // 既存の設定を確認
   const hasEnv = fs.existsSync(path.join(projectRoot, '.env'));
 
   const authDir = path.join(projectRoot, 'store', 'auth');
   const hasAuth = fs.existsSync(authDir) && fs.readdirSync(authDir).length > 0;
 
-  let hasRegisteredGroups = false;
-  // Check JSON file first (pre-migration)
+  let hasRegisteredGroupsCount = false;
+  // 最初に JSON ファイルを確認（マイグレーション前）
   if (fs.existsSync(path.join(projectRoot, 'data', 'registered_groups.json'))) {
-    hasRegisteredGroups = true;
+    hasRegisteredGroupsCount = true;
   } else {
-    // Check SQLite directly using better-sqlite3 (no sqlite3 CLI needed)
+    // sqlite3 CLI ではなく better-sqlite3 を使用して SQLite を直接確認
     const dbPath = path.join(STORE_DIR, 'messages.db');
     if (fs.existsSync(dbPath)) {
       try {
@@ -58,10 +58,10 @@ export async function run(_args: string[]): Promise<void> {
         const row = db
           .prepare('SELECT COUNT(*) as count FROM registered_groups')
           .get() as { count: number };
-        if (row.count > 0) hasRegisteredGroups = true;
+        if (row.count > 0) hasRegisteredGroupsCount = true;
         db.close();
       } catch {
-        // Table might not exist yet
+        // テーブルがまだ存在しない可能性あり
       }
     }
   }
@@ -74,9 +74,9 @@ export async function run(_args: string[]): Promise<void> {
       docker,
       hasEnv,
       hasAuth,
-      hasRegisteredGroups,
+      hasRegisteredGroupsCount,
     },
-    'Environment check complete',
+    '環境チェック完了',
   );
 
   emitStatus('CHECK_ENVIRONMENT', {
@@ -87,7 +87,7 @@ export async function run(_args: string[]): Promise<void> {
     DOCKER: docker,
     HAS_ENV: hasEnv,
     HAS_AUTH: hasAuth,
-    HAS_REGISTERED_GROUPS: hasRegisteredGroups,
+    HAS_REGISTERED_GROUPS: hasRegisteredGroupsCount,
     STATUS: 'success',
     LOG: 'logs/setup.log',
   });
