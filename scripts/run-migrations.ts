@@ -13,16 +13,16 @@ function compareSemver(a: string, b: string): number {
   return 0;
 }
 
-// Resolve tsx binary once to avoid npx race conditions across migrations
+// マイグレーションを跨ぐ npx のレースコンディションを避けるため、tsx バイナリを一度だけ解決します
 function resolveTsx(): string {
-  // Check local node_modules first
+  // 最初にローカルの node_modules を確認
   const local = path.resolve('node_modules/.bin/tsx');
   if (fs.existsSync(local)) return local;
-  // Fall back to whichever tsx is in PATH
+  // PATH にある tsx にフォールバック
   try {
     return execSync('which tsx', { encoding: 'utf-8' }).trim();
   } catch {
-    return 'npx'; // last resort
+    return 'npx'; // 最終手段
   }
 }
 
@@ -34,7 +34,7 @@ const newCorePath = process.argv[4];
 
 if (!fromVersion || !toVersion || !newCorePath) {
   console.error(
-    'Usage: tsx scripts/run-migrations.ts <from-version> <to-version> <new-core-path>',
+    '使用法: tsx scripts/run-migrations.ts <from-version> <to-version> <new-core-path>',
   );
   process.exit(1);
 }
@@ -47,7 +47,7 @@ interface MigrationResult {
 
 const results: MigrationResult[] = [];
 
-// Look for migrations in the new core
+// 新しいコア内のマイグレーションを探す
 const migrationsDir = path.join(newCorePath, 'migrations');
 
 if (!fs.existsSync(migrationsDir)) {
@@ -55,7 +55,7 @@ if (!fs.existsSync(migrationsDir)) {
   process.exit(0);
 }
 
-// Discover migration directories (version-named)
+// マイグレーションディレクトリ（バージョン名）を検出
 const entries = fs.readdirSync(migrationsDir, { withFileTypes: true });
 const migrationVersions = entries
   .filter((e) => e.isDirectory() && /^\d+\.\d+\.\d+$/.test(e.name))
@@ -74,7 +74,7 @@ for (const version of migrationVersions) {
     results.push({
       version,
       success: false,
-      error: `Migration ${version}/index.ts not found`,
+      error: `マイグレーション ${version}/index.ts が見つかりません`,
     });
     continue;
   }
@@ -99,7 +99,7 @@ console.log(
   JSON.stringify({ migrationsRun: results.length, results }, null, 2),
 );
 
-// Exit with error if any migration failed
+// いずれかのマイグレーションが失敗した場合はエラーで終了
 if (results.some((r) => !r.success)) {
   process.exit(1);
 }
