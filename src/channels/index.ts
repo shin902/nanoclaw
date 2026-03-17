@@ -1,5 +1,5 @@
-// Channel self-registration barrel file.
-// Each import triggers the channel module's registerChannel() call.
+// チャネル自己登録用バレルファイル。
+// 各インポートにより、チャネルモジュールの registerChannel() 呼び出しがトリガーされます。
 
 // discord
 
