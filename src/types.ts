@@ -1,35 +1,35 @@
 export interface AdditionalMount {
-  hostPath: string; // Absolute path on host (supports ~ for home)
-  containerPath?: string; // Optional — defaults to basename of hostPath. Mounted at /workspace/extra/{value}
-  readonly?: boolean; // Default: true for safety
+  hostPath: string; // ホスト上の絶対パス（ホームディレクトリの ~ をサポート）
+  containerPath?: string; // オプション — デフォルトは hostPath のベース名。/workspace/extra/{value} にマウントされる
+  readonly?: boolean; // デフォルト: 安全のため true
 }
 
 /**
- * Mount Allowlist - Security configuration for additional mounts
- * This file should be stored at ~/.config/nanoclaw/mount-allowlist.json
- * and is NOT mounted into any container, making it tamper-proof from agents.
+ * マウント許可リスト - 追加マウントのセキュリティ設定
+ * このファイルは ~/.config/nanoclaw/mount-allowlist.json に保存されるべきであり、
+ * エージェントによる改ざんを防ぐため、いかなるコンテナにもマウントされない。
  */
 export interface MountAllowlist {
-  // Directories that can be mounted into containers
+  // コンテナにマウント可能なディレクトリ
   allowedRoots: AllowedRoot[];
-  // Glob patterns for paths that should never be mounted (e.g., ".ssh", ".gnupg")
+  // 決してマウントしてはならないパスのグロブパターン（例: ".ssh", ".gnupg"）
   blockedPatterns: string[];
-  // If true, non-main groups can only mount read-only regardless of config
+  // true の場合、メイン以外のグループは設定に関わらず読み取り専用でのみマウント可能
   nonMainReadOnly: boolean;
 }
 
 export interface AllowedRoot {
-  // Absolute path or ~ for home (e.g., "~/projects", "/var/repos")
+  // 絶対パスまたはホームディレクトリを表す ~（例: "~/projects", "/var/repos"）
   path: string;
-  // Whether read-write mounts are allowed under this root
+  // このルート配下で読み書き可能なマウントを許可するかどうか
   allowReadWrite: boolean;
-  // Optional description for documentation
+  // ドキュメント用のオプションの説明
   description?: string;
 }
 
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
-  timeout?: number; // Default: 300000 (5 minutes)
+  timeout?: number; // デフォルト: 300000 (5分)
 }
 
 export interface RegisteredGroup {
@@ -38,8 +38,8 @@ export interface RegisteredGroup {
   trigger: string;
   added_at: string;
   containerConfig?: ContainerConfig;
-  requiresTrigger?: boolean; // Default: true for groups, false for solo chats
-  isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
+  requiresTrigger?: boolean; // デフォルト: グループの場合は true、個人チャットの場合は false
+  isMain?: boolean; // メインコントロールグループの場合は true（トリガー不要、特権あり）
 }
 
 export interface NewMessage {
@@ -77,7 +77,7 @@ export interface TaskRunLog {
   error: string | null;
 }
 
-// --- Channel abstraction ---
+// --- チャネルの抽象化 ---
 
 export interface Channel {
   name: string;
@@ -86,18 +86,18 @@ export interface Channel {
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;
-  // Optional: typing indicator. Channels that support it implement it.
+  // オプション: 入力中インジケーター。サポートするチャネルで実装される。
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
-  // Optional: sync group/chat names from the platform.
+  // オプション: プラットフォームからグループ/チャット名を同期する。
   syncGroups?(force: boolean): Promise<void>;
 }
 
-// Callback type that channels use to deliver inbound messages
+// チャネルが受信メッセージを配信するために使用するコールバック型
 export type OnInboundMessage = (chatJid: string, message: NewMessage) => void;
 
-// Callback for chat metadata discovery.
-// name is optional — channels that deliver names inline (Telegram) pass it here;
-// channels that sync names separately (via syncGroups) omit it.
+// チャットのメタデータ検出用コールバック。
+// name はオプション — 名前をインラインで配信するチャネル（Telegram）はここに渡す。
+// 名前を個別に同期するチャネル（syncGroups経由）は省略する。
 export type OnChatMetadata = (
   chatJid: string,
   timestamp: string,
