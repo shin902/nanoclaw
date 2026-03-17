@@ -1,6 +1,7 @@
 /**
- * Container runtime abstraction for NanoClaw.
- * All runtime-specific logic lives here so swapping runtimes means changing one file.
+ * NanoClaw 用コンテナランタイム抽象化。
+ * ランタイム固有のロジックはすべてここに集約されているため、
+ * ランタイムを変更する場合はこのファイルのみを修正します。
  */
 import { execSync } from 'child_process';
 import fs from 'fs';
@@ -8,17 +9,17 @@ import os from 'os';
 
 import { logger } from './logger.js';
 
-/** The container runtime binary name. */
+/** コンテナランタイムのバイナリ名。 */
 export const CONTAINER_RUNTIME_BIN = 'docker';
 
-/** Hostname containers use to reach the host machine. */
+/** コンテナがホストマシンに到達するために使用するホスト名。 */
 export const CONTAINER_HOST_GATEWAY = 'host.docker.internal';
 
 /**
- * Address the credential proxy binds to.
- * Docker Desktop (macOS): 127.0.0.1 — the VM routes host.docker.internal to loopback.
- * Docker (Linux): bind to the docker0 bridge IP so only containers can reach it,
- *   falling back to 0.0.0.0 if the interface isn't found.
+ * 認証情報プロキシがバインドするアドレス。
+ * Docker Desktop (macOS): 127.0.0.1 — VM が host.docker.internal をループバックにルーティングします。
+ * Docker (Linux): コンテナのみが到達できるよう docker0 ブリッジ IP にバインドし、
+ *   インターフェースが見つからない場合は 0.0.0.0 にフォールバックします。
  */
 export const PROXY_BIND_HOST =
   process.env.CREDENTIAL_PROXY_HOST || detectProxyBindHost();
@@ -26,11 +27,11 @@ export const PROXY_BIND_HOST =
 function detectProxyBindHost(): string {
   if (os.platform() === 'darwin') return '127.0.0.1';
 
-  // WSL uses Docker Desktop (same VM routing as macOS) — loopback is correct.
-  // Check /proc filesystem, not env vars — WSL_DISTRO_NAME isn't set under systemd.
+  // WSL は Docker Desktop を使用しており、macOS と同じ VM ルーティングであるため、ループバックで正解。
+  // 環境変数ではなく /proc ファイルシステムを確認します — WSL_DISTRO_NAME は systemd 下では設定されないため。
   if (fs.existsSync('/proc/sys/fs/binfmt_misc/WSLInterop')) return '127.0.0.1';
 
-  // Bare-metal Linux: bind to the docker0 bridge IP instead of 0.0.0.0
+  // ベアメタル Linux: 0.0.0.0 ではなく docker0 ブリッジ IP にバインド
   const ifaces = os.networkInterfaces();
   const docker0 = ifaces['docker0'];
   if (docker0) {
@@ -40,16 +41,16 @@ function detectProxyBindHost(): string {
   return '0.0.0.0';
 }
 
-/** CLI args needed for the container to resolve the host gateway. */
+/** コンテナがホストゲートウェイを解決するために必要な CLI 引数。 */
 export function hostGatewayArgs(): string[] {
-  // On Linux, host.docker.internal isn't built-in — add it explicitly
+  // Linux では host.docker.internal は組み込まれていないため、明示的に追加
   if (os.platform() === 'linux') {
     return ['--add-host=host.docker.internal:host-gateway'];
   }
   return [];
 }
 
-/** Returns CLI args for a readonly bind mount. */
+/** 読み取り専用バインドマウント用の CLI 引数を返します。 */
 export function readonlyMountArgs(
   hostPath: string,
   containerPath: string,
@@ -57,12 +58,12 @@ export function readonlyMountArgs(
   return ['-v', `${hostPath}:${containerPath}:ro`];
 }
 
-/** Returns the shell command to stop a container by name. */
+/** 名前を指定してコンテナを停止するシェルコマンドを返します。 */
 export function stopContainer(name: string): string {
   return `${CONTAINER_RUNTIME_BIN} stop ${name}`;
 }
 
-/** Ensure the container runtime is running, starting it if needed. */
+/** コンテナランタイムが実行されていることを確認し、必要に応じて起動します。 */
 export function ensureContainerRuntimeRunning(): void {
   try {
     execSync(`${CONTAINER_RUNTIME_BIN} info`, {
@@ -100,7 +101,7 @@ export function ensureContainerRuntimeRunning(): void {
   }
 }
 
-/** Kill orphaned NanoClaw containers from previous runs. */
+/** 以前の実行から残っている、孤立した NanoClaw コンテナを終了します。 */
 export function cleanupOrphans(): void {
   try {
     const output = execSync(
@@ -112,7 +113,7 @@ export function cleanupOrphans(): void {
       try {
         execSync(stopContainer(name), { stdio: 'pipe' });
       } catch {
-        /* already stopped */
+        /* すでに停止済み */
       }
     }
     if (orphans.length > 0) {
