@@ -1,59 +1,59 @@
-# NanoClaw Skills Architecture
+# NanoClaw スキルアーキテクチャ
 
-## Core Principle
+## コア原則
 
-Skills are self-contained, auditable packages that apply programmatically via standard git merge mechanics. Claude Code orchestrates the process — running git commands, reading skill manifests, and stepping in only when git can't resolve a conflict on its own. The system uses existing git features (`merge-file`, `rerere`, `apply`) rather than custom merge infrastructure.
+スキルは、標準的な git マージの仕組みを介してプログラム的に適用される、自己完結型で監査可能なパッケージです。Claude Code がプロセスのオーケストレーションを行い、git コマンドの実行、スキルマニフェストの読み込み、そして git が自力でコンフリクトを解決できない場合にのみ介入します。システムは、独自のマージインフラではなく、既存の git 機能（`merge-file`, `rerere`, `apply`）を使用します。
 
-### The Three-Level Resolution Model
+### 3 段階の解決モデル
 
-Every operation in the system follows this escalation:
+システムのすべての操作は、以下の段階に従って進められます：
 
-1. **Git** — deterministic, programmatic. `git merge-file` merges, `git rerere` replays cached resolutions, structured operations apply without merging. No AI involved. This handles the vast majority of cases.
-2. **Claude Code** — reads `SKILL.md`, `.intent.md`, migration guides, and `state.yaml` to understand context. Resolves conflicts that git can't handle programmatically. Caches the resolution via `git rerere` so it never needs to resolve the same conflict again.
-3. **User** — Claude Code asks the user when it lacks context or intent. This happens when two features genuinely conflict at an application level (not just a text-level merge conflict) and a human decision is needed about desired behavior.
+1. **Git** — 確定的、プログラム的。`git merge-file` でマージし、`git rerere` でキャッシュされた解決を再生し、構造化された操作はマージなしで適用されます。AI は関与しません。大多数のケースを処理します。
+2. **Claude Code** — `SKILL.md`, `.intent.md`、マイグレーションガイド、および `state.yaml` を読み込んでコンテキストを理解します。git がプログラム的に処理できないコンフリクトを解決します。解決策を `git rerere` でキャッシュするため、同じコンフリクトを二度解決する必要はありません。
+3. **ユーザー** — コンテキストや意図が不足している場合、Claude Code がユーザーに判断を仰ぎます。これは、2 つの機能が（単なるテキストレベルのマージコンフリクトではなく）アプリケーションレベルで真に競合しており、望ましい動作について人間による決定が必要な場合に発生します。
 
-The goal is that Level 1 handles everything on a mature, well-tested installation. Level 2 handles first-time conflicts and edge cases. Level 3 is rare and only for genuine ambiguity.
+目標は、十分にテストされた成熟したインストール環境ではレベル 1 がすべてを処理することです。レベル 2 は初回発生のコンフリクトやエッジケースを処理します。レベル 3 は稀であり、真に曖昧な場合にのみ発生します。
 
-**Important**: a clean merge (exit code 0) does not guarantee working code. Semantic conflicts — a renamed variable, a shifted reference, a changed function signature — can produce clean text merges that break at runtime. **Tests must run after every operation**, regardless of whether the merge was clean. A clean merge with failing tests escalates to Level 2.
+**重要**：クリーンなマージ（終了コード 0）が、動作するコードを保証するわけではありません。変数名の変更、参照の移動、関数シグネチャの変更などの意味的な競合は、テキストレベルではクリーンにマージされても、実行時に壊れる可能性があります。**マージがクリーンであったかどうかにかかわらず、すべての操作の後にテストを実行する必要があります**。クリーンなマージでテストが失敗した場合は、レベル 2 へエスカレーションされます。
 
-### Safe Operations via Backup/Restore
+### バックアップ/リストアによる安全な操作
 
-Many users clone the repo without forking, don't commit their changes, and don't think of themselves as git users. The system must work safely for them without requiring any git knowledge.
+多くのユーザーはフォークせずにリポジトリをクローンし、変更をコミットせず、自身を git ユーザーとは考えていません。システムは、git の知識を必要とせずに、彼らにとって安全に動作しなければなりません。
 
-Before any operation, the system copies all files that will be modified to `.nanoclaw/backup/`. On success, the backup is deleted. On failure, the backup is restored. This provides rollback safety regardless of whether the user commits, pushes, or understands git.
-
----
-
-## 1. The Shared Base
-
-`.nanoclaw/base/` holds the clean core — the original codebase before any skills or customizations were applied. This is the stable common ancestor for all three-way merges, and it only changes on core updates.
-
-- `git merge-file` uses the base to compute two diffs: what the user changed (current vs base) and what the skill wants to change (base vs skill's modified file), then combines both
-- The base enables drift detection: if a file's hash differs from its base hash, something has been modified (skills, user customizations, or both)
-- Each skill's `modify/` files contain the full file as it should look with that skill applied (including any prerequisite skill changes), all authored against the same clean core base
-
-On a **fresh codebase**, the user's files are identical to the base. This means `git merge-file` always exits cleanly for the first skill — the merge trivially produces the skill's modified version. No special-casing needed.
-
-When multiple skills modify the same file, the three-way merge handles the overlap naturally. If Telegram and Discord both modify `src/index.ts`, and both skill files include the Telegram changes, those common changes merge cleanly against the base. The result is the base + all skill changes + user customizations.
+操作の前に、システムは修正対象のすべてのファイルを `.nanoclaw/backup/` にコピーします。成功するとバックアップは削除されます。失敗するとバックアップが復元されます。これにより、ユーザーがコミットやプッシュをしていなくても、また git を理解していなくても、ロールバックの安全性が確保されます。
 
 ---
 
-## 2. Two Types of Changes: Code Merges vs. Structured Operations
+## 1. 共有ベース
 
-Not all files should be merged as text. The system distinguishes between **code files** (merged via `git merge-file`) and **structured data** (modified via deterministic operations).
+`.nanoclaw/base/` にはクリーンなコア — スキルやカスタマイズが適用される前のオリジナルのコードベース — が保持されます。これはすべての 3 ウェイマージにおける安定した共通の祖先であり、コアのアップデート時にのみ変更されます。
 
-### Code Files (Three-Way Merge)
+- `git merge-file` はベースを使用して 2 つの差分を計算します：ユーザーが変更したもの（現在 vs ベース）と、スキルが変更したいもの（ベース vs スキルの修正済みファイル）。そしてその両方を組み合わせます。
+- ベースはドリフト（乖離）検出を可能にします：ファイルのハッシュがベースのハッシュと異なる場合、何らかの修正（スキル、ユーザーのカスタマイズ、またはその両方）が加えられています。
+- 各スキルの `modify/` ファイルには、そのスキルが適用された状態（前提となるスキルの変更を含む）のファイル全体が含まれており、すべて同じクリーンなコアベースに対して作成されています。
 
-Source code files where skills weave in logic — route handlers, middleware, business logic. These are merged using `git merge-file` against the shared base. The skill carries a full modified version of the file.
+**新規のコードベース**では、ユーザーのファイルはベースと同一です。これは、最初のスキルに対して `git merge-file` が常にクリーンに終了することを意味します — マージによってスキルの修正版がそのまま生成されます。特別な処理は不要です。
 
-### Structured Data (Deterministic Operations)
+複数のスキルが同じファイルを修正する場合、3 ウェイマージが重なりを自然に処理します。Telegram と Discord が両方とも `src/index.ts` を修正し、両方のスキルファイルに Telegram の変更が含まれている場合、それらの共通の変更はベースに対してクリーンにマージされます。結果は、ベース + すべてのスキル変更 + ユーザーのカスタマイズとなります。
 
-Files like `package.json`, `docker-compose.yml`, `.env.example`, and generated configs are not code you merge — they're structured data you aggregate. Multiple skills adding npm dependencies to `package.json` shouldn't require a three-way text merge. Instead, skills declare their structured requirements in the manifest, and the system applies them programmatically.
+---
 
-**Structured operations are implicit.** If a skill declares `npm_dependencies`, the system handles dependency installation automatically. There is no need for the skill author to add `npm install` to `post_apply`. When multiple skills are applied in sequence, the system batches structured operations: merge all dependency declarations first, write `package.json` once, run `npm install` once at the end.
+## 2. 2 種類の変更：コードマージ vs 構造化操作
+
+すべてのファイルがテキストとしてマージされるべきではありません。システムは、**コードファイル**（`git merge-file` でマージ）と**構造化データ**（確定的操作で修正）を区別します。
+
+### コードファイル (3 ウェイマージ)
+
+ルートハンドラー、ミドルウェア、ビジネスロジックなど、スキルがロジックを織り込むソースコードファイルです。これらは共有ベースに対して `git merge-file` を使用してマージされます。スキルは修正されたファイル全体を保持します。
+
+### 構造化データ (確定的操作)
+
+`package.json`, `docker-compose.yml`, `.env.example`、および生成された設定ファイルなどは、マージするコードではなく、集約する構造化データです。複数のスキルが `package.json` に npm 依存関係を追加する場合、3 ウェイのテキストマージは必要ありません。代わりに、スキルはマニフェストで構造化された要件を宣言し、システムがそれをプログラムで適用します。
+
+**構造化操作は暗黙的です。** スキルが `npm_dependencies` を宣言すれば、システムが依存関係のインストールを自動的に処理します。スキル作者が `post_apply` に `npm install` を追加する必要はありません。複数のスキルが連続して適用される場合、システムは構造化操作をバッチ処理します：まずすべての依存関係の宣言をマージし、`package.json` を一度だけ書き込み、最後に `npm install` を一度だけ実行します。
 
 ```yaml
-# In manifest.yaml
+# manifest.yaml 内
 structured:
   npm_dependencies:
     whatsapp-web.js: "^2.1.0"
@@ -68,111 +68,111 @@ structured:
       ports: ["6380:6379"]
 ```
 
-### Structured Operation Conflicts
+### 構造化操作の競合
 
-Structured operations eliminate text merge conflicts but can still conflict at a semantic level:
+構造化操作はテキストマージのコンフリクトを排除しますが、意味レベルでの競合は依然として発生する可能性があります：
 
-- **NPM version conflicts**: two skills request incompatible semver ranges for the same package
-- **Port collisions**: two docker-compose services claim the same host port
-- **Service name collisions**: two skills define a service with the same name
-- **Env var duplicates**: two skills declare the same variable with different expectations
+- **NPM バージョンの競合**: 2 つのスキルが同じパッケージに対して互換性のない semver 範囲を要求している
+- **ポートの衝突**: 2 つの docker-compose サービスが同じホストポートを要求している
+- **サービス名の衝突**: 2 つのスキルが同じ名前のサービスを定義している
+- **環境変数の重複**: 2 つのスキルが同じ変数を異なる期待値で宣言している
 
-The resolution policy:
+解決ポリシー：
 
-1. **Automatic where possible**: widen semver ranges to find a compatible version, detect and flag port/name collisions
-2. **Level 2 (Claude Code)**: if automatic resolution fails, Claude proposes options based on skill intents
-3. **Level 3 (User)**: if it's a genuine product choice (which Redis instance should get port 6379?), ask the user
+1. **可能な限り自動解決**: semver の範囲を広げて互換性のあるバージョンを探す、ポートや名前の衝突を検出してフラグを立てる
+2. **レベル 2 (Claude Code)**: 自動解決が失敗した場合、Claude がスキルの意図に基づいてオプションを提案する
+3. **レベル 3 (ユーザー)**: どちらの Redis インスタンスにポート 6379 を割り当てるか、といった真の製品選択である場合、ユーザーに尋ねる
 
-Structured operation conflicts are included in the CI overlap graph alongside code file overlaps, so the maintainer test matrix catches these before users encounter them.
+構造化操作の競合は、コードファイルの重なりとともに CI のオーバーラップグラフに含まれるため、ユーザーが遭遇する前にメンテナーのテストマトリックスでこれらを捕捉できます。
 
-### State Records Structured Outcomes
+### 状態記録による構造化結果の保存
 
-`state.yaml` records not just the declared dependencies but the resolved outcomes — actual installed versions, resolved port assignments, final env var list. This makes structured operations replayable and auditable.
+`state.yaml` は、宣言された依存関係だけでなく、解決された結果 — 実際にインストールされたバージョン、解決されたポート割り当て、最終的な環境変数リスト — も記録します。これにより、構造化操作が再実行可能かつ監査可能になります。
 
-### Deterministic Serialization
+### 確定的シリアライズ
 
-All structured output (YAML, JSON) uses stable serialization: sorted keys, consistent quoting, normalized whitespace. This prevents noisy diffs in git history from non-functional formatting changes.
+すべての構造化出力（YAML, JSON）は、キーのソート、一貫したクォート、正規化された空白など、安定したシリアライズを使用します。これにより、機能に影響しないフォーマット変更による git 履歴のノイズの多い差分を防ぎます。
 
 ---
 
-## 3. Skill Package Structure
+## 3. スキルパッケージの構造
 
-A skill contains only the files it adds or modifies. For modified code files, the skill carries the **full modified file** (the clean core with the skill's changes applied).
+スキルには、追加または修正したファイルのみが含まれます。修正されたコードファイルについては、スキルは**修正済みファイル全体**（クリーンなコアにスキルの変更を適用したもの）を保持します。
 
 ```
 skills/
   add-whatsapp/
-    SKILL.md                          # Context, intent, what this skill does and why
-    manifest.yaml                     # Metadata, dependencies, env vars, post-apply steps
-    tests/                            # Integration tests for this skill
+    SKILL.md                          # コンテキスト、意図、このスキルが何をするか、なぜ行うか
+    manifest.yaml                     # メタデータ、依存関係、環境変数、適用後のステップ
+    tests/                            # このスキルの統合テスト
       whatsapp.test.ts
-    add/                              # New files — copied directly
+    add/                              # 新規ファイル — 直接コピーされる
       src/channels/whatsapp.ts
       src/channels/whatsapp.config.ts
-    modify/                           # Modified code files — merged via git merge-file
+    modify/                           # 修正されたコードファイル — git merge-file でマージ
       src/
-        server.ts                     # Full file: clean core + whatsapp changes
-        server.ts.intent.md           # "Adds WhatsApp webhook route and message handler"
-        config.ts                     # Full file: clean core + whatsapp config options
-        config.ts.intent.md           # "Adds WhatsApp channel configuration block"
+        server.ts                     # ファイル全体: クリーンなコア + whatsapp の変更
+        server.ts.intent.md           # 「WhatsApp ウェブフックルートとメッセージハンドラーを追加」
+        config.ts                     # ファイル全体: クリーンなコア + whatsapp 設定オプション
+        config.ts.intent.md           # 「WhatsApp チャネル設定ブロックを追加」
 ```
 
-### Why Full Modified Files
+### なぜ修正済みファイル全体なのか
 
-- `git merge-file` requires three full files — no intermediate reconstruction step
-- Git's three-way merge uses context matching, so it works even if the user has moved code around — unlike line-number-based diffs that break immediately
-- Auditable: `diff .nanoclaw/base/src/server.ts skills/add-whatsapp/modify/src/server.ts` shows exactly what the skill changes
-- Deterministic: same three inputs always produce the same merge result
-- Size is negligible since NanoClaw's core files are small
+- `git merge-file` は 3 つの完全なファイルを必要とします — 中間的な再構築ステップは不要です
+- git の 3 ウェイマージはコンテキストマッチングを使用するため、ユーザーがコードを移動していても動作します — すぐに壊れてしまう行番号ベースの diff とは異なります
+- 監査可能： `diff .nanoclaw/base/src/server.ts skills/add-whatsapp/modify/src/server.ts` を実行すれば、スキルが何を変更するのか正確にわかります
+- 確定的：同じ 3 つの入力は常に同じマージ結果を生成します
+- NanoClaw のコアファイルは小さいため、サイズは無視できる程度です
 
-### Intent Files
+### 意図ファイル (Intent Files)
 
-Each modified code file has a corresponding `.intent.md` with structured headings:
+修正された各コードファイルには、構造化された見出しを持つ対応する `.intent.md` があります：
 
 ```markdown
-# Intent: server.ts modifications
+# 意図 (Intent): server.ts の修正
 
-## What this skill adds
-Adds WhatsApp webhook route and message handler to the Express server.
+## このスキルが追加するもの
+Express サーバーに WhatsApp ウェブフックルートとメッセージハンドラーを追加します。
 
-## Key sections
-- Route registration at `/webhook/whatsapp` (POST and GET for verification)
-- Message handler middleware between auth and response pipeline
+## 主要セクション
+- `/webhook/whatsapp` でのルート登録（検証用の POST と GET）
+- 認証とレスポンスパイプラインの間のメッセージハンドラーミドルウェア
 
-## Invariants
-- Must not interfere with other channel webhook routes
-- Auth middleware must run before the WhatsApp handler
-- Error handling must propagate to the global error handler
+## 不変条件
+- 他のチャネルのウェブフックルートを妨害してはならない
+- 認証ミドルウェアは WhatsApp ハンドラーの前に実行されなければならない
+- エラーハンドリングはグローバルエラーハンドラーに伝播させなければならない
 
-## Must-keep sections
-- The webhook verification flow (GET route) is required by WhatsApp Cloud API
+## 保持すべきセクション
+- ウェブフック検証フロー（GET ルート）は WhatsApp Cloud API で必須です
 ```
 
-Structured headings (What, Key sections, Invariants, Must-keep) give Claude Code specific guidance during conflict resolution instead of requiring it to infer from unstructured text.
+構造化された見出し（追加するもの、主要セクション、不変条件、保持すべきもの）は、Claude Code が非構造化テキストから推測するのではなく、コンフリクト解消時に具体的な指針を得るために役立ちます。
 
-### Manifest Format
+### マニフェスト形式
 
 ```yaml
-# --- Required fields ---
+# --- 必須フィールド ---
 skill: whatsapp
 version: 1.2.0
-description: "WhatsApp Business API integration via Cloud API"
-core_version: 0.1.0               # The core version this skill was authored against
+description: "Cloud API を介した WhatsApp Business API 連携"
+core_version: 0.1.0               # このスキルが作成された際のコアバージョン
 
-# Files this skill adds
+# このスキルが追加するファイル
 adds:
   - src/channels/whatsapp.ts
   - src/channels/whatsapp.config.ts
 
-# Code files this skill modifies (three-way merge)
+# このスキルが修正するコードファイル (3 ウェイマージ)
 modifies:
   - src/server.ts
   - src/config.ts
 
-# File operations (renames, deletes, moves — see Section 5)
+# ファイル操作 (名前変更、削除、移動 — セクション 5 参照)
 file_ops: []
 
-# Structured operations (deterministic, no merge — implicit handling)
+# 構造化操作 (確定的、マージなし — 暗黙的に処理)
 structured:
   npm_dependencies:
     whatsapp-web.js: "^2.1.0"
@@ -182,14 +182,14 @@ structured:
     - WHATSAPP_VERIFY_TOKEN
     - WHATSAPP_PHONE_ID
 
-# Skill relationships
-conflicts: []              # Skills that cannot coexist without agent resolution
-depends: []                # Skills that must be applied first
+# スキルの関係
+conflicts: []              # エージェントによる解決なしには共存できないスキル
+depends: []                # 先に適用されていなければならないスキル
 
-# Test command — runs after apply to validate the skill works
+# テストコマンド — スキルが動作することを検証するために適用後に実行される
 test: "npx vitest run src/channels/whatsapp.test.ts"
 
-# --- Future fields (not yet implemented in v0.1) ---
+# --- 将来のフィールド (v0.1 では未実装) ---
 # author: nanoclaw-team
 # license: MIT
 # min_skills_system_version: "0.1.0"
@@ -197,65 +197,65 @@ test: "npx vitest run src/channels/whatsapp.test.ts"
 # post_apply: []
 ```
 
-Note: `post_apply` is only for operations that can't be expressed as structured declarations. Dependency installation is **never** in `post_apply` — it's handled implicitly by the structured operations system.
+注： `post_apply` は、構造化された宣言として表現できない操作のみに使用されます。依存関係のインストールは、**決して** `post_apply` に含めないでください — それは構造化操作システムによって暗黙的に処理されます。
 
 ---
 
-## 4. Skills, Customization, and Layering
+## 4. スキル、カスタマイズ、およびレイヤリング
 
-### One Skill, One Happy Path
+### 1 つのスキル、1 つのハッピーパス
 
-A skill implements **one way of doing something — the reasonable default that covers 80% of users.** `add-telegram` gives you a clean, solid Telegram integration. It doesn't try to anticipate every use case with predefined configuration options and modes.
+スキルは、**あることを行う 1 つの方法 — ユーザーの 80% をカバーする妥当なデフォルト**を実装します。`add-telegram` は、クリーンで堅実な Telegram 連携を提供します。定義済みの設定オプションやモードであらゆるユースケースを想定しようとはしません。
 
-### Customization Is Just More Patching
+### カスタマイズはさらなるパッチに過ぎない
 
-The entire system is built around applying transformations to a codebase. Customizing a skill after applying it is no different from any other modification:
+システム全体が、コードベースへの変換の適用を中心に構築されています。適用後にスキルをカスタマイズすることは、他のいかなる修正とも変わりません：
 
-- **Apply the skill** — get the standard Telegram integration
-- **Modify from there** — using the customize flow (tracked patch), direct editing (detected by hash tracking), or by applying additional skills that build on top
+- **スキルを適用する** — 標準的な Telegram 連携を取得します
+- **そこから修正する** — カスタマイズフロー（追跡パッチ）、直接編集（ハッシュ追跡で検出）、またはその上に構築される追加スキルの適用を使用します
 
-### Layered Skills
+### レイヤースキル
 
-Skills can build on other skills:
+スキルは他のスキルの上に構築できます：
 
 ```
-add-telegram                    # Core Telegram integration (happy path)
-  ├── telegram-reactions        # Adds reaction handling (depends: [telegram])
-  ├── telegram-multi-bot        # Multiple bot instances (depends: [telegram])
-  └── telegram-filters          # Custom message filtering (depends: [telegram])
+add-telegram                    # コア Telegram 連携 (ハッピーパス)
+  ├── telegram-reactions        # リアクション処理を追加 (depends: [telegram])
+  ├── telegram-multi-bot        # 複数のボットインスタンス (depends: [telegram])
+  └── telegram-filters          # カスタムメッセージフィルタリング (depends: [telegram])
 ```
 
-Each layer is a separate skill with its own `SKILL.md`, manifest (with `depends: [telegram]`), tests, and modified files. The user composes exactly what they want by stacking skills.
+各レイヤーは、独自の `SKILL.md`、マニフェスト（`depends: [telegram]` を含む）、テスト、および修正済みファイルを持つ個別のスキルです。ユーザーはスキルを積み重ねることで、望み通りの機能を正確に構成します。
 
-### Custom Skill Application
+### カスタムスキルの適用
 
-A user can apply a skill with their own modifications in a single step:
+ユーザーは、自身の修正を加えたスキルを単一のステップで適用できます：
 
-1. Apply the skill normally (programmatic merge)
-2. Claude Code asks if the user wants to make any modifications
-3. User describes what they want different
-4. Claude Code makes the modifications on top of the freshly applied skill
-5. The modifications are recorded as a custom patch tied to this skill
+1. 通常通りスキルを適用する（プログラムによるマージ）
+2. Claude Code がユーザーに修正を加えたいか尋ねる
+3. ユーザーが変更したい内容を説明する
+4. Claude Code が適用直後のスキルの上に修正を加える
+5. 修正内容は、このスキルに紐付いたカスタムパッチとして記録される
 
-Recorded in `state.yaml`:
+`state.yaml` に記録される例：
 
 ```yaml
 applied_skills:
   - skill: telegram
     version: 1.0.0
     custom_patch: .nanoclaw/custom/telegram-group-only.patch
-    custom_patch_description: "Restrict bot responses to group chats only"
+    custom_patch_description: "ボットの応答をグループチャットのみに制限"
 ```
 
-On replay, the skill applies programmatically, then the custom patch applies on top.
+再実行（replay）時には、スキルがプログラム的に適用された後、その上にカスタムパッチが適用されます。
 
 ---
 
-## 5. File Operations: Renames, Deletes, Moves
+## 5. ファイル操作：名前変更、削除、移動
 
-Core updates and some skills will need to rename, delete, or move files. These are not text merges — they're structural changes handled as explicit scripted operations.
+コアのアップデートや一部のスキルでは、ファイルの名前変更、削除、または移動が必要になります。これらはテキストマージではなく、明示的にスクリプト化された操作として処理される構造的な変更です。
 
-### Declaration in Manifest
+### マニフェストでの宣言
 
 ```yaml
 file_ops:
@@ -269,124 +269,124 @@ file_ops:
     to: src/lib/helpers.ts
 ```
 
-### Execution Order
+### 実行順序
 
-File operations run **before** code merges, because merges need to target the correct file paths:
+マージは正しいファイルパスをターゲットにする必要があるため、ファイル操作はコードのマージの**前**に実行されます：
 
-1. Pre-flight checks (state validation, core version, dependencies, conflicts, drift detection)
-2. Acquire operation lock
-3. **Backup** all files that will be touched
-4. **File operations** (renames, deletes, moves)
-5. Copy new files from `add/`
-6. Three-way merge modified code files
-7. Conflict resolution (rerere auto-resolve, or return with `backupPending: true`)
-8. Apply structured operations (npm deps, env vars, docker-compose — batched)
-9. Run `npm install` (once, if any structured npm_dependencies exist)
-10. Update state (record skill application, file hashes, structured outcomes)
-11. Run tests (if `manifest.test` defined; rollback state + backup on failure)
-12. Clean up (delete backup on success, release lock)
+1. 実行前チェック（状態検証、コアバージョン、依存関係、競合、ドリフト検出）
+2. 操作ロックを取得
+3. 変更対象のすべてのファイルを**バックアップ**
+4. **ファイル操作**（名前変更、削除、移動）を実行
+5. `add/` から新規ファイルをコピー
+6. 修正されたコードファイルを 3 ウェイマージ
+7. コンフリクト解消（rerere による自動解決、または `backupPending: true` を返して中断）
+8. 構造化操作（npm 依存関係、環境変数、docker-compose — 一括処理）を適用
+9. `npm install` を実行（構造化された npm_dependencies が存在する場合に一度だけ）
+10. 状態を更新（スキルの適用記録、ファイルハッシュ、構造化された結果）
+11. テストを実行（`manifest.test` が定義されている場合。失敗時は状態をロールバック + バックアップから復元）
+12. クリーンアップ（成功時にバックアップを削除、ロックを解放）
 
-### Path Remapping for Skills
+### スキルのためのパスリマッピング
 
-When the core renames a file (e.g., `server.ts` → `app.ts`), skills authored against the old path still reference `server.ts` in their `modifies` and `modify/` directories. **Skill packages are never mutated on the user's machine.**
+コアがファイル名を変更した場合（例：`server.ts` → `app.ts`）、古いパスに対して作成されたスキルは、依然として `modifies` や `modify/` ディレクトリで `server.ts` を参照しています。**ユーザーのマシン上でスキルパッケージが書き換えられることはありません。**
 
-Instead, core updates ship a **compatibility map**:
+代わりに、コアのアップデートには**互換性マップ**が同梱されます：
 
 ```yaml
-# In the update package
+# アップデートパッケージ内
 path_remap:
   src/server.ts: src/app.ts
   src/old-config.ts: src/config/main.ts
 ```
 
-The system resolves paths at apply time: if a skill targets `src/server.ts` and the remap says it's now `src/app.ts`, the merge runs against `src/app.ts`. The remap is recorded in `state.yaml` so future operations are consistent.
+システムは適用時にパスを解決します：スキルが `src/server.ts` をターゲットにしており、リマップによってそれが現在 `src/app.ts` であると示されている場合、マージは `src/app.ts` に対して実行されます。リマップは `state.yaml` に記録され、将来の操作での一貫性が保たれます。
 
-### Safety Checks
+### 安全チェック
 
-Before executing file operations:
+ファイル操作を実行する前に：
 
-- Verify the source file exists
-- For deletes: warn if the file has modifications beyond the base (user or skill changes would be lost)
+- ソースファイルが存在することを確認
+- 削除の場合：ファイルにベース以上の修正（ユーザーやスキルの変更）がある場合は警告する（それらの変更が失われるため）
 
 ---
 
-## 6. The Apply Flow
+## 6. 適用フロー (Apply Flow)
 
-When a user runs the skill's slash command in Claude Code:
+ユーザーが Claude Code でスキルのスラッシュコマンドを実行したとき：
 
-### Step 1: Pre-flight Checks
+### ステップ 1: 実行前チェック
 
-- Core version compatibility
-- Dependencies satisfied
-- No unresolvable conflicts with applied skills
-- Check for untracked changes (see Section 9)
+- コアバージョンの互換性
+- 依存関係が満たされていること
+- 適用済みスキルとの間に解決不可能な競合がないこと
+- 未追跡の変更がないか確認（セクション 9 参照）
 
-### Step 2: Backup
+### ステップ 2: バックアップ
 
-Copy all files that will be modified to `.nanoclaw/backup/`. If the operation fails at any point, restore from backup.
+修正されるすべてのファイルを `.nanoclaw/backup/` にコピーします。操作が途中で失敗した場合は、バックアップから復元します。
 
-### Step 3: File Operations
+### ステップ 3: ファイル操作
 
-Execute renames, deletes, or moves with safety checks. Apply path remapping if needed.
+安全チェックを伴う名前変更、削除、または移動を実行します。必要に応じてパスリマッピングを適用します。
 
-### Step 4: Apply New Files
+### ステップ 4: 新規ファイルの適用
 
 ```bash
 cp skills/add-whatsapp/add/src/channels/whatsapp.ts src/channels/whatsapp.ts
 ```
 
-### Step 5: Merge Modified Code Files
+### ステップ 5: 修正されたコードファイルのマージ
 
-For each file in `modifies` (with path remapping applied):
+`modifies` 内の各ファイルに対して（パスリマッピング適用後）：
 
 ```bash
 git merge-file src/server.ts .nanoclaw/base/src/server.ts skills/add-whatsapp/modify/src/server.ts
 ```
 
-- **Exit code 0**: clean merge, move on
-- **Exit code > 0**: conflict markers in file, proceed to resolution
+- **終了コード 0**: クリーンなマージ。次へ進む。
+- **終了コード > 0**: ファイル内にコンフリクトマーカーあり。解決プロセスへ進む。
 
-### Step 6: Conflict Resolution (Three-Level)
+### ステップ 6: コンフリクト解消 (3 段階)
 
-1. **Check shared resolution cache** (`.nanoclaw/resolutions/`) — load into local `git rerere` if a verified resolution exists for this skill combination. **Only apply if input hashes match exactly** (base hash + current hash + skill modified hash).
-2. **`git rerere`** — checks local cache. If found, applied automatically. Done.
-3. **Claude Code** — reads conflict markers + `SKILL.md` + `.intent.md` (Invariants, Must-keep sections) of current and previously applied skills. Resolves. `git rerere` caches the resolution.
-4. **User** — if Claude Code cannot determine intent, it asks the user for the desired behavior.
+1. **共有解決キャッシュを確認** (`.nanoclaw/resolutions/`) — このスキルの組み合わせに対して検証済みの解決策が存在する場合、ローカルの `git rerere` にロードします。**入力ハッシュ（ベース、現在、スキルの修正済みハッシュ）が正確に一致する場合のみ適用されます。**
+2. **`git rerere`** — ローカルキャッシュを確認します。見つかれば自動的に適用され、完了です。
+3. **Claude Code** — コンフリクトマーカー、および現在および過去に適用されたスキルの `SKILL.md`, `.intent.md`（不変条件、保持すべきセクション）を読み込みます。解決を実行し、`git rerere` がその解決策をキャッシュします。
+4. **ユーザー** — Claude Code が意図を判断できない場合、ユーザーに望ましい動作を尋ねます。
 
-### Step 7: Apply Structured Operations
+### ステップ 7: 構造化操作の適用
 
-Collect all structured declarations (from this skill and any previously applied skills if batching). Apply deterministically:
+すべての構造化された宣言（このスキルと、一括処理中の過去のスキルから）を収集します。確定的に適用します：
 
-- Merge npm dependencies into `package.json` (check for version conflicts)
-- Append env vars to `.env.example`
-- Merge docker-compose services (check for port/name collisions)
-- Run `npm install` **once** at the end
-- Record resolved outcomes in state
+- `package.json` に npm 依存関係をマージ（バージョンの競合を確認）
+- `.env.example` に環境変数を追記
+- docker-compose サービスをマージ（ポートや名前の衝突を確認）
+- 最後に `npm install` を**一度だけ**実行
+- 解決された結果を状態に記録
 
-### Step 8: Post-Apply and Validate
+### ステップ 8: 適用後の処理と検証
 
-1. Run any `post_apply` commands (non-structured operations only)
-2. Update `.nanoclaw/state.yaml` — skill record, file hashes (base, skill, merged per file), structured outcomes
-3. **Run skill tests** — mandatory, even if all merges were clean
-4. If tests fail on a clean merge → escalate to Level 2 (Claude Code diagnoses the semantic conflict)
+1. `post_apply` コマンドがあれば実行します（構造化操作以外のみ）
+2. `.nanoclaw/state.yaml` を更新 — スキルの記録、ファイルハッシュ（ファイルごとのベース、スキル、マージ後）、構造化された結果
+3. **スキルテストを実行** — マージがすべてクリーンであっても必須
+4. クリーンなマージでテストが失敗した場合 → レベル 2 へエスカレーション（Claude Code が意味的な競合を診断）
 
-### Step 9: Clean Up
+### ステップ 9: クリーンアップ
 
-If tests pass, delete `.nanoclaw/backup/`. The operation is complete.
+テストに合格すれば、`.nanoclaw/backup/` を削除します。操作完了です。
 
-If tests fail and Level 2 can't resolve, restore from `.nanoclaw/backup/` and report the failure.
+テストが失敗し、レベル 2 でも解決できない場合は、`.nanoclaw/backup/` から復元し、失敗を報告します。
 
 ---
 
-## 7. Shared Resolution Cache
+## 7. 共有解決キャッシュ
 
-### The Problem
+### 問題点
 
-`git rerere` is local by default. But NanoClaw has thousands of users applying the same skill combinations. Every user hitting the same conflict and waiting for Claude Code to resolve it is wasteful.
+`git rerere` はデフォルトではローカルのみです。しかし、NanoClaw には何千人ものユーザーがおり、同じスキルの組み合わせを適用しています。すべてのユーザーが同じコンフリクトに遭遇し、Claude Code がそれを解決するのを待つのは無駄です。
 
-### The Solution
+### 解決策
 
-NanoClaw maintains a verified resolution cache in `.nanoclaw/resolutions/` that ships with the project. This is the shared artifact — **not** `.git/rr-cache/`, which stays local.
+NanoClaw は、プロジェクトに同梱される検証済みの解決キャッシュを `.nanoclaw/resolutions/` に維持します。これは共有される成果物であり、ローカルに残る `.git/rr-cache/` とは**異なります**。
 
 ```
 .nanoclaw/
@@ -400,9 +400,9 @@ NanoClaw maintains a verified resolution cache in `.nanoclaw/resolutions/` that 
       meta.yaml
 ```
 
-### Hash Enforcement
+### ハッシュ強制 (Hash Enforcement)
 
-A cached resolution is **only applied if input hashes match exactly**:
+キャッシュされた解決策は、**入力ハッシュが正確に一致する場合のみ適用されます**：
 
 ```yaml
 # meta.yaml
@@ -422,86 +422,86 @@ input_hashes:
 output_hash: "ddd..."
 ```
 
-If any input hash doesn't match, the cached resolution is skipped and the system proceeds to Level 2.
+いずれかの入力ハッシュが一致しない場合、キャッシュされた解決策はスキップされ、システムはレベル 2 へ進みます。
 
-### Validated: rerere + merge-file Require an Index Adapter
+### 検証済み：rerere + merge-file にはインデックスアダプターが必要
 
-`git rerere` does **not** natively recognize `git merge-file` output. This was validated in Phase 0 testing (`tests/phase0-merge-rerere.sh`, 33 tests).
+`git rerere` は、ネイティブでは `git merge-file` の出力を認識**しません**。これはフェーズ 0 のテスト（`tests/phase0-merge-rerere.sh`, 33 テスト）で検証されました。
 
-The issue is not about conflict marker format — `merge-file` uses filenames as labels (`<<<<<<< current.ts`) while `git merge` uses branch names (`<<<<<<< HEAD`), but rerere strips all labels and hashes only the conflict body. The formats are compatible.
+問題はコンフリクトマーカーの形式ではありません — `merge-file` はラベルとしてファイル名を使用し (`<<<<<<< current.ts`)、`git merge` はブランチ名を使用しますが (`<<<<<<< HEAD`)、rerere はすべてのラベルを取り除き、コンフリクトの本体のみをハッシュ化します。形式に互換性はあります。
 
-The actual issue: **rerere requires unmerged index entries** (stages 1/2/3) to detect that a merge conflict exists. A normal `git merge` creates these automatically. `git merge-file` operates on the filesystem only and does not touch the index.
+本当の問題は： **rerere はマージコンフリクトが存在することを検出するために、未マージのインデックスエントリ**（ステージ 1/2/3）を必要とすることです。通常の `git merge` はこれらを自動的に作成します。`git merge-file` はファイルシステム上でのみ動作し、インデックスには触れません。
 
-#### The Adapter
+#### アダプター
 
-After `git merge-file` produces a conflict, the system must create the index state that rerere expects:
+`git merge-file` がコンフリクトを生成した後、システムは rerere が期待するインデックス状態を作成しなければなりません：
 
 ```bash
-# 1. Run the merge (produces conflict markers in the working tree)
+# 1. マージを実行（作業ツリーにコンフリクトマーカーが生成される）
 git merge-file current.ts .nanoclaw/base/src/file.ts skills/add-whatsapp/modify/src/file.ts
 
-# 2. If exit code > 0 (conflict), set up rerere adapter:
+# 2. 終了コード > 0 (コンフリクト) の場合、rerere アダプターをセットアップ：
 
-# Create blob objects for the three versions
+# 3 つのバージョンのための blob オブジェクトを作成
 base_hash=$(git hash-object -w .nanoclaw/base/src/file.ts)
-ours_hash=$(git hash-object -w skills/previous-skill/modify/src/file.ts)  # or the pre-merge current
+ours_hash=$(git hash-object -w skills/previous-skill/modify/src/file.ts)  # またはマージ前の current
 theirs_hash=$(git hash-object -w skills/add-whatsapp/modify/src/file.ts)
 
-# Create unmerged index entries at stages 1 (base), 2 (ours), 3 (theirs)
+# ステージ 1 (ベース), 2 (ours), 3 (theirs) に未マージのインデックスエントリを作成
 printf '100644 %s 1\tsrc/file.ts\0' "$base_hash" | git update-index --index-info
 printf '100644 %s 2\tsrc/file.ts\0' "$ours_hash" | git update-index --index-info
 printf '100644 %s 3\tsrc/file.ts\0' "$theirs_hash" | git update-index --index-info
 
-# Set merge state (rerere checks for MERGE_HEAD)
+# マージステートを設定（rerere は MERGE_HEAD をチェックする）
 echo "$(git rev-parse HEAD)" > .git/MERGE_HEAD
 echo "skill merge" > .git/MERGE_MSG
 
-# 3. Now rerere can see the conflict
-git rerere  # Records preimage, or auto-resolves from cache
+# 3. これで rerere がコンフリクトを認識できるようになる
+git rerere  # preimage を記録、またはキャッシュから自動解決
 
-# 4. After resolution (manual or auto):
+# 4. 解決後（手動または自動）：
 git add src/file.ts
-git rerere  # Records postimage (caches the resolution)
+git rerere  # postimage を記録（解決策をキャッシュ）
 
-# 5. Clean up merge state
+# 5. マージステートをクリーンアップ
 rm .git/MERGE_HEAD .git/MERGE_MSG
 git reset HEAD
 ```
 
-#### Key Properties Validated
+#### 検証された主要な特性
 
-- **Conflict body identity**: `merge-file` and `git merge` produce identical conflict bodies for the same inputs. Rerere hashes the body only, so resolutions learned from either source are interchangeable.
-- **Hash determinism**: The same conflict always produces the same rerere hash. This is critical for the shared resolution cache.
-- **Resolution portability**: Copying `preimage` and `postimage` files (plus the hash directory name) from one repo's `.git/rr-cache/` to another works. Rerere auto-resolves in the target repo.
-- **Adjacent line sensitivity**: Changes within ~3 lines of each other are treated as a single conflict hunk by `merge-file`. Skills that modify the same area of a file will conflict even if they modify different lines. This is expected and handled by the resolution cache.
+- **コンフリクト本体の同一性**: 同じ入力に対して、`merge-file` と `git merge` は同一のコンフリクト本体を生成します。Rerere は本体のみをハッシュ化するため、どちらのソースから学習された解決策も相互に入れ替え可能です。
+- **ハッシュの確定性**: 同じコンフリクトからは常に同じ rerere ハッシュが生成されます。これは共有解決キャッシュにとって極めて重要です。
+- **解決策のポータビリティ**: あるリポジトリの `.git/rr-cache/` から `preimage` と `postimage` ファイル（およびハッシュディレクトリ名）を別のリポジトリにコピーして動作します。ターゲットリポジトリで rerere が自動解決を行います。
+- **隣接行への感度**: 約 3 行以内の変更は、`merge-file` によって単一のコンフリクトハンクとして扱われます。ファイルの同じ領域を修正するスキルは、たとえ異なる行を修正していてもコンフリクトします。これは想定内であり、解決キャッシュによって処理されます。
 
-#### Implication: Git Repository Required
+#### 帰結：Git リポジトリが必須
 
-The adapter requires `git hash-object`, `git update-index`, and `.git/rr-cache/`. This means the project directory must be a git repository for rerere caching to work. Users who download a zip (no `.git/`) lose resolution caching but not functionality — conflicts escalate directly to Level 2 (Claude Code resolves). The system should detect this case and skip rerere operations gracefully.
+このアダプターには `git hash-object`, `git update-index`, および `.git/rr-cache/` が必要です。つまり、rerere キャッシングを動作させるには、プロジェクトディレクトリが git リポジトリである必要があります。zip をダウンロードしたユーザー（`.git/` なし）は、解決キャッシュを利用できませんが、機能が失われるわけではありません — コンフリクトは直接レベル 2（Claude Code による解決）へエスカレーションされます。システムはこのケースを検出し、rerere 操作を適切にスキップする必要があります。
 
-### Maintainer Workflow
+### メンテナーのワークフロー
 
-When releasing a core update or new skill version:
+コアのアップデートや新しいスキルのバージョンをリリースする際：
 
-1. Fresh codebase at target core version
-2. Apply each official skill individually — verify clean merge, run tests
-3. Apply pairwise combinations **for skills that modify at least one common file or have overlapping structured operations**
-4. Apply curated three-skill stacks based on popularity and high overlap
-5. Resolve all conflicts (code and structured)
-6. Record all resolutions with input hashes
-7. Run full test suite for every combination
-8. Ship verified resolutions with the release
+1. ターゲットとなるコアバージョンのフレッシュなコードベースを用意
+2. 各公式スキルを個別に適用 — クリーンなマージを確認し、テストを実行
+3. **少なくとも 1 つの共通ファイルを修正するスキル、または構造化操作が重なるスキルのペア**について、組み合わせを適用
+4. 人気のある、あるいは重なりの多いスキルの 3 つ以上のスタックを適用
+5. すべてのコンフリクト（コードおよび構造化）を解決
+6. すべての解決策を入力ハッシュとともに記録
+7. すべての組み合わせに対してフルテストスイートを実行
+8. 検証済みの解決策をリリースに同梱
 
-The bar: **a user with any common combination of official skills should never encounter an unresolved conflict.**
+基準： **公式スキルの一般的な組み合わせを使用するユーザーが、未解決のコンフリクトに遭遇してはならない。**
 
 ---
 
-## 8. State Tracking
+## 8. 状態追跡 (State Tracking)
 
-`.nanoclaw/state.yaml` records everything about the installation:
+`.nanoclaw/state.yaml` は、インストールに関するすべてを記録します：
 
 ```yaml
-skills_system_version: "0.1.0"     # Schema version — tooling checks this before any operation
+skills_system_version: "0.1.0"     # スキーマバージョン — ツールが操作前にこれを確認
 core_version: 0.1.0
 
 applied_skills:
@@ -540,402 +540,404 @@ applied_skills:
       test: "npx vitest run src/channels/discord.test.ts"
 
 custom_modifications:
-  - description: "Added custom logging middleware"
+  - description: "カスタムロギングミドルウェアを追加"
     applied_at: 2026-02-15T12:00:00Z
     files_modified:
       - src/server.ts
     patch_file: .nanoclaw/custom/001-logging-middleware.patch
 ```
 
-**v0.1 implementation notes:**
-- `file_hashes` stores a single SHA-256 hash per file (the final merged result). Three-part hashes (base/skill_modified/merged) are planned for a future version to improve drift diagnosis.
-- Applied skills use `name` as the key field (not `skill`), matching the TypeScript `AppliedSkill` interface.
-- `structured_outcomes` stores the raw manifest values plus the `test` command. Resolved npm versions (actual installed versions vs semver ranges) are not yet tracked.
-- Fields like `installed_at`, `last_updated`, `path_remap`, `rebased_at`, `core_version_at_apply`, `files_added`, and `files_modified` are planned for future versions.
+**v0.1 実装上の注意：**
+- `file_hashes` はファイルごとに単一の SHA-256 ハッシュ（最終的なマージ結果）を保存します。ドリフト診断を改善するため、将来のバージョンでは 3 つのハッシュ（ベース/スキルの修正/マージ後）を保存する予定です。
+- 適用済みスキルは、TypeScript の `AppliedSkill` インターフェースに合わせて、キーフィールドとして `name`（`skill` ではない）を使用します。
+- `structured_outcomes` はマニフェストの生の値を `test` コマンドとともに保存します。解決された npm バージョン（semver 範囲ではなく実際にインストールされたバージョン）はまだ追跡されていません。
+- `installed_at`, `last_updated`, `path_remap`, `rebased_at`, `core_version_at_apply`, `files_added`, `files_modified` などのフィールドは、将来のバージョンで計画されています。
 
 ---
 
-## 9. Untracked Changes
+## 9. 未追跡の変更 (Untracked Changes)
 
-If a user edits files directly, the system detects this via hash comparison.
+ユーザーがファイルを直接編集した場合、システムはハッシュ比較によってこれを検出します。
 
-### When Detection Happens
+### 検出が行われるタイミング
 
-Before **any operation that modifies the codebase**: applying a skill, removing a skill, updating the core, replaying, or rebasing.
+**コードベースを修正するいかなる操作**の前：スキルの適用、スキルの削除、コアのアップデート、再実行（replay）、またはリベース（rebase）。
 
-### What Happens
+### 何が起こるか
 
 ```
-Detected untracked changes to src/server.ts.
-[1] Record these as a custom modification (recommended)
-[2] Continue anyway (changes preserved, but not tracked for future replay)
-[3] Abort
+src/server.ts への未追跡の変更が検出されました。
+[1] これらをカスタム修正として記録する (推奨)
+[2] とにかく続行する (変更は保持されますが、将来の再実行用には追跡されません)
+[3] 中止する
 ```
 
-The system never blocks or loses work. Option 1 generates a patch and records it, making changes reproducible. Option 2 preserves the changes but they won't survive replay.
+システムが作業をブロックしたり失わせたりすることはありません。オプション 1 はパッチを生成して記録し、変更を再現可能にします。オプション 2 は変更を保持しますが、再実行時には残りません。
 
-### The Recovery Guarantee
+### 復旧の保証
 
-No matter how much a user modifies their codebase outside the system, the three-level model can always bring them back:
+ユーザーがシステム外でどれだけコードベースを修正したとしても、3 段階モデルは常に一貫した状態に戻すことができます：
 
-1. **Git**: diff current files against base, identify what changed
-2. **Claude Code**: read `state.yaml` to understand what skills were applied, compare against actual file state, identify discrepancies
-3. **User**: Claude Code asks what they intended, what to keep, what to discard
+1. **Git**: 現在のファイルとベースの差分をとり、何が変わったか特定する
+2. **Claude Code**: `state.yaml` を読み込んでどのスキルが適用されたか理解し、実際のファイル状態と比較して不整合を特定する
+3. **ユーザー**: ユーザーが何を意図していたのか、何を保持し、何を破棄すべきか Claude Code が尋ねる
 
-There is no unrecoverable state.
+復旧不可能な状態というものはありません。
 
 ---
 
-## 10. Core Updates
+## 10. コアのアップデート
 
-Core updates must be as programmatic as possible. The NanoClaw team is responsible for ensuring updates apply cleanly to common skill combinations.
+コアのアップデートは可能な限りプログラム的に行われなければなりません。NanoClaw チームは、一般的なスキルの組み合わせに対してアップデートがクリーンに適用されることを保証する責任があります。
 
-### Patches and Migrations
+### パッチとマイグレーション
 
-Most core changes — bug fixes, performance improvements, new functionality — propagate automatically through the three-way merge. No special handling needed.
+バグ修正、パフォーマンス改善、新機能など、ほとんどのコアの変更は 3 ウェイマージを通じて自動的に伝播します。特別な処理は不要です。
 
-**Breaking changes** — changed defaults, removed features, functionality moved to skills — require a **migration**. A migration is a skill that preserves the old behavior, authored against the new core. It's applied automatically during the update so the user's setup doesn't change.
+**破壊的変更** — デフォルトの変更、機能の削除、スキルへの機能移動 — には**マイグレーション**が必要です。マイグレーションとは、新しいコアに対して作成された、古い動作を維持するスキルのことです。アップデート中に自動的に適用されるため、ユーザーのセットアップは変わりません。
 
-The maintainer's responsibility when making a breaking change: make the change in core, author a migration skill that reverts it, add the entry to `migrations.yaml`, test it. That's the cost of breaking changes.
+破壊的変更を行う際のメンテナーの責任：コアに変更を加え、それを元に戻すマイグレーションスキルを作成し、`migrations.yaml` にエントリを追加し、テストすること。それが破壊的変更のコストです。
 
 ### `migrations.yaml`
 
-An append-only file in the repo root. Each entry records a breaking change and the skill that preserves the old behavior:
+リポジトリルートにある、追記専用のファイルです。各エントリには、破壊的変更と、古い動作を保持するスキルが記録されます：
 
 ```yaml
 - since: 0.6.0
   skill: apple-containers@1.0.0
-  description: "Preserves Apple Containers (default changed to Docker in 0.6)"
+  description: "Apple Containers を維持 (0.6 でデフォルトが Docker に変更)"
 
 - since: 0.7.0
   skill: add-whatsapp@2.0.0
-  description: "Preserves WhatsApp (moved from core to skill in 0.7)"
+  description: "WhatsApp を維持 (0.7 でコアからスキルに移動)"
 
 - since: 0.8.0
   skill: legacy-auth@1.0.0
-  description: "Preserves legacy auth module (removed from core in 0.8)"
+  description: "レガシー認証モジュールを維持 (0.8 でコアから削除)"
 ```
 
-Migration skills are regular skills in the `skills/` directory. They have manifests, intent files, tests — everything. They're authored against the **new** core version: the modified file is the new core with the specific breaking change reverted, everything else (bug fixes, new features) identical to the new core.
+マイグレーションスキルは `skills/` ディレクトリにある通常のスキルです。マニフェスト、意図ファイル、テストなど、すべてを備えています。これらは**新しい**コアバージョンに対して作成されます：修正されたファイルは、特定の破壊的変更が元に戻された新しいコアであり、それ以外（バグ修正、新機能）は新しいコアと同一です。
 
-### How Migrations Work During Updates
+### アップデート中のマイグレーションの仕組み
 
-1. Three-way merge brings in everything from the new core — patches, breaking changes, all of it
-2. Conflict resolution (normal)
-3. Re-apply custom patches (normal)
-4. **Update base to new core**
-5. Filter `migrations.yaml` for entries where `since` > user's old `core_version`
-6. **Apply each migration skill using the normal apply flow against the new base**
-7. Record migration skills in `state.yaml` like any other skill
-8. Run tests
+1. 3 ウェイマージによって、パッチ、破壊的変更、その他すべてを含む新しいコアの内容が取り込まれます。
+2. コンフリクト解消（通常通り）
+3. カスタムパッチの再適用（通常通り）
+4. **ベースを新しいコアに更新**
+5. `migrations.yaml` をフィルタリングし、`since` > ユーザーの古い `core_version` であるエントリを抽出します。
+6. **各マイグレーションスキルを、新しいベースに対して通常の適用フローで適用します。**
+7. マイグレーションスキルを他のスキルと同様に `state.yaml` に記録します。
+8. テストを実行します。
 
-Step 6 is just the same apply function used for any skill. The migration skill merges against the new base:
+ステップ 6 は、通常のスキルで使用されるものと同じ適用関数です。マイグレーションスキルは新しいベースに対してマージされます：
 
-- **Base**: new core (e.g., v0.8 with Docker)
-- **Current**: user's file after the update merge (new core + user's customizations preserved by the earlier merge)
-- **Other**: migration skill's file (new core with Docker reverted to Apple, everything else identical)
+- **Base**: 新しいコア（例: Docker を備えた v0.8）
+- **Current**: アップデートマージ後のユーザーのファイル（新しいコア + 先のマージで保持されたユーザーのカスタマイズ）
+- **Other**: マイグレーションスキルのファイル（Docker が Apple に戻された新しいコア、それ以外は同一）
 
-Three-way merge correctly keeps user's customizations, reverts the breaking change, and preserves all bug fixes. If there's a conflict, normal resolution: cache → Claude → user.
+3 ウェイマージは、ユーザーのカスタマイズを正しく保持し、破壊的変更を元に戻し、すべてのバグ修正を維持します。コンフリクトが発生した場合は、通常の解決フロー（キャッシュ → Claude → ユーザー）が適用されます。
 
-For big version jumps (v0.5 → v0.8), all applicable migrations are applied in sequence. Migration skills are maintained against the latest core version, so they always compose correctly with the current codebase.
+大きなバージョンジャンプ（v0.5 → v0.8）の場合、該当するすべてのマイグレーションが順番に適用されます。マイグレーションスキルは最新のコアバージョンに対して維持されるため、常に現在のコードベースと正しく構成されます。
 
-### What the User Sees
+### ユーザーに見えるもの
 
 ```
-Core updated: 0.5.0 → 0.8.0
-  ✓ All patches applied
+コアがアップデートされました： 0.5.0 → 0.8.0
+  ✓ すべてのパッチが適用されました
 
-  Preserving your current setup:
+  現在のセットアップを維持しています：
     + apple-containers@1.0.0
     + add-whatsapp@2.0.0
     + legacy-auth@1.0.0
 
-  Skill updates:
+  スキルの更新：
     ✓ add-telegram 1.0.0 → 1.2.0
 
-  To accept new defaults: /remove-skill <name>
-  ✓ All tests passing
+  新しいデフォルトを受け入れるには： /remove-skill <名前>
+  ✓ すべてのテストに合格しました
 ```
 
-No prompts, no choices during the update. The user's setup doesn't change. If they later want to accept a new default, they remove the migration skill.
+アップデート中にプロンプトや選択肢は表示されません。ユーザーのセットアップは変わりません。後で新しいデフォルトを受け入れたい場合は、マイグレーションスキルを削除します。
 
-### What the Core Team Ships With an Update
+### コアチームがアップデートとともに提供するもの
 
 ```
 updates/
   0.5.0-to-0.6.0/
-    migration.md                  # What changed, why, and how it affects skills
-    files/                        # The new core files
-    file_ops:                     # Any renames, deletes, moves
-    path_remap:                   # Compatibility map for old skill paths
-    resolutions/                  # Pre-computed resolutions for official skills
+    migration.md                  # 何が変わったか、なぜか、スキルにどう影響するか
+    files/                        # 新しいコアファイル
+    file_ops:                     # 名前変更、削除、移動があれば
+    path_remap:                   # 古いスキルパスのための互換性マップ
+    resolutions/                  # 公式スキルのための事前計算された解決策
 ```
 
-Plus any new migration skills added to `skills/` and entries appended to `migrations.yaml`.
+これに加えて、`skills/` に追加された新しいマイグレーションスキルと、`migrations.yaml` に追記されたエントリが含まれます。
 
-### The Maintainer's Process
+### メンテナーのプロセス
 
-1. **Make the core change**
-2. **If it's a breaking change**: author a migration skill against the new core, add entry to `migrations.yaml`
-3. **Write `migration.md`** — what changed, why, what skills might be affected
-4. **Test every official skill individually** against the new core (including migration skills)
-5. **Test pairwise combinations** for skills that share modified files or structured operations
-6. **Test curated three-skill stacks** based on popularity and overlap
-7. **Resolve all conflicts**
-8. **Record all resolutions** with enforced input hashes
-9. **Run full test suites**
-10. **Ship everything** — migration guide, migration skills, file ops, path remap, resolutions
+1. **コアに変更を加える**
+2. **それが破壊的変更である場合**：新しいコアに対してマイグレーションスキルを作成し、`migrations.yaml` にエントリを追加する
+3. **`migration.md` を書く** — 何が変わったか、なぜか、どのスキルが影響を受ける可能性があるか
+4. **すべての公式スキルを個別に**新しいコア（マイグレーションスキルを含む）に対してテストする
+5. **修正ファイルを共有するスキル、または構造化操作が重なるスキル**について、ペアの組み合わせをテストする
+6. 人気や重なりに基づき、厳選された 3 つのスキルのスタックをテストする
+7. すべてのコンフリクトを解決する
+8. 強制された入力ハッシュとともに、すべての解決策を記録する
+9. フルテストスイートを実行する
+10. **すべてを出荷する** — マイグレーションガイド、マイグレーションスキル、ファイル操作、パスリマップ、解決策
 
-The bar: **patches apply silently. Breaking changes are auto-preserved via migration skills. A user should never be surprised by a change to their working setup.**
+基準： **パッチは静かに適用される。破壊的変更はマイグレーションスキルによって自動的に維持される。ユーザーが動作中のセットアップへの変更に驚くことがあってはならない。**
 
-### Update Flow (Full)
+---
 
-#### Step 1: Pre-flight
+### アップデートフロー (詳細)
 
-- Check for untracked changes
-- Read `state.yaml`
-- Load shipped resolutions
-- Parse `migrations.yaml`, filter for applicable migrations
+#### ステップ 1: 実行前チェック
 
-#### Step 2: Preview
+- 未追跡の変更がないか確認
+- `state.yaml` を読み込む
+- 同梱された解決策をロードする
+- `migrations.yaml` をパースし、該当するマイグレーションを抽出する
 
-Before modifying anything, show the user what's coming. This uses only git commands — no files are opened or changed:
+#### ステップ 2: プレビュー
+
+修正を加える前に、何が起こるかをユーザーに示します。これは git コマンドのみを使用し、ファイルを開いたり変更したりしません：
 
 ```bash
-# Compute common base
+# 共通のベースを計算
 BASE=$(git merge-base HEAD upstream/$BRANCH)
 
-# Upstream commits since last sync
+# 最後の同期以降のアップストリームのコミット
 git log --oneline $BASE..upstream/$BRANCH
 
-# Files changed upstream
+# アップストリームで変更されたファイル
 git diff --name-only $BASE..upstream/$BRANCH
 ```
 
-Present a summary grouped by impact:
+影響ごとにグループ化した要約を提示します：
 
 ```
-Update available: 0.5.0 → 0.8.0 (12 commits)
+アップデートがあります： 0.5.0 → 0.8.0 (12 コミット)
 
-  Source:  4 files modified (server.ts, config.ts, ...)
-  Skills:  2 new skills added, 1 skill updated
-  Config:  package.json, docker-compose.yml updated
+  ソース: 4 ファイル修正 (server.ts, config.ts, ...)
+  スキル: 2 つの新しいスキルが追加、1 つのスキルが更新
+  設定: package.json, docker-compose.yml が更新
 
-  Migrations (auto-applied to preserve your setup):
-    + apple-containers@1.0.0 (container default changed to Docker)
-    + add-whatsapp@2.0.0 (WhatsApp moved from core to skill)
+  マイグレーション (セットアップ維持のため自動適用されます):
+    + apple-containers@1.0.0 (コンテナのデフォルトが Docker に変更されました)
+    + add-whatsapp@2.0.0 (WhatsApp がコアからスキルに移動しました)
 
-  Skill updates:
+  スキルの更新:
     add-telegram 1.0.0 → 1.2.0
 
-  [1] Proceed with update
-  [2] Abort
+  [1] アップデートを続行する
+  [2] 中止する
 ```
 
-If the user aborts, stop here. Nothing was modified.
+ユーザーが中止した場合は、ここで停止します。何も修正されません。
 
-#### Step 3: Backup
+#### ステップ 3: バックアップ
 
-Copy all files that will be modified to `.nanoclaw/backup/`.
+修正されるすべてのファイルを `.nanoclaw/backup/` にコピーします。
 
-#### Step 4: File Operations and Path Remap
+#### ステップ 4: ファイル操作とパスリマップ
 
-Apply renames, deletes, moves. Record path remap in state.
+名前変更、削除、移動を適用します。パスリマップを状態に記録します。
 
-#### Step 5: Three-Way Merge
+#### ステップ 5: 3 ウェイマージ
 
-For each core file that changed:
+変更された各コアファイルに対して：
 
 ```bash
 git merge-file src/server.ts .nanoclaw/base/src/server.ts updates/0.5.0-to-0.6.0/files/src/server.ts
 ```
 
-#### Step 6: Conflict Resolution
+#### ステップ 6: コンフリクト解消
 
-1. Shipped resolutions (hash-verified) → automatic
-2. `git rerere` local cache → automatic
-3. Claude Code with `migration.md` + skill intents → resolves
-4. User → only for genuine ambiguity
+1. 同梱された解決策（ハッシュ検証済み） → 自動
+2. `git rerere` ローカルキャッシュ → 自動
+3. `migration.md` とスキルの意図を備えた Claude Code → 解決
+4. ユーザー → 真に曖昧な場合のみ
 
-#### Step 7: Re-apply Custom Patches
+#### ステップ 7: カスタムパッチの再適用
 
 ```bash
 git apply --3way .nanoclaw/custom/001-logging-middleware.patch
 ```
 
-Using `--3way` allows git to fall back to three-way merge when line numbers have drifted. If `--3way` fails, escalate to Level 2.
+`--3way` を使用することで、行番号がずれていても git が 3 ウェイマージにフォールバックできるようになります。`--3way` が失敗した場合は、レベル 2 へエスカレーションします。
 
-#### Step 8: Update Base
+#### ステップ 8: ベースの更新
 
-`.nanoclaw/base/` replaced with new clean core. This is the **only time** the base changes.
+`.nanoclaw/base/` を新しいクリーンなコアに置き換えます。ベースが変更されるのは**このときだけ**です。
 
-#### Step 9: Apply Migration Skills
+#### ステップ 9: マイグレーションスキルの適用
 
-For each applicable migration (where `since` > old `core_version`), apply the migration skill using the normal apply flow against the new base. Record in `state.yaml`.
+該当する各マイグレーション（`since` > 古い `core_version`）について、新しいベースに対して通常の適用フローでマイグレーションスキルを適用します。`state.yaml` に記録します。
 
-#### Step 10: Re-apply Updated Skills
+#### ステップ 10: 更新されたスキルの再適用
 
-Skills live in the repo and update alongside core files. After the update, compare the version in each skill's `manifest.yaml` on disk against the version recorded in `state.yaml`.
+スキルはリポジトリ内に存在し、コアファイルとともに更新されます。アップデート後、ディスク上の各スキルの `manifest.yaml` にあるバージョンと、`state.yaml` に記録されているバージョンを比較します。
 
-For each skill where the on-disk version is newer than the recorded version:
+ディスク上のバージョンの方が新しいスキルごとに：
 
-1. Re-apply the skill using the normal apply flow against the new base
-2. The three-way merge brings in the skill's new changes while preserving user customizations
-3. Re-apply any custom patches tied to the skill (`git apply --3way`)
-4. Update the version in `state.yaml`
+1. 新しいベースに対して、通常の適用フローでスキルを再適用します。
+2. 3 ウェイマージにより、ユーザーのカスタマイズを保持しながらスキルの新しい変更が取り込まれます。
+3. スキルに紐付いたカスタムパッチがあれば再適用します (`git apply --3way`)。
+4. `state.yaml` のバージョンを更新します。
 
-Skills whose version hasn't changed are skipped — no action needed.
+バージョンが変わっていないスキルはスキップされます。
 
-If the user has a custom patch on a skill that changed significantly, the patch may conflict. Normal resolution: cache → Claude → user.
+ユーザーが大幅に変更されたスキルに対してカスタムパッチを当てていた場合、パッチがコンフリクトする可能性があります。通常の解決フロー（キャッシュ → Claude → ユーザー）が適用されます。
 
-#### Step 11: Re-run Structured Operations
+#### ステップ 11: 構造化操作の再実行
 
-Recompute structured operations against the updated codebase to ensure consistency.
+一貫性を確保するため、アップデートされたコードベースに対して構造化操作を再計算します。
 
-#### Step 12: Validate
+#### ステップ 12: 検証
 
-- Run all skill tests — mandatory
-- Compatibility report:
+- すべてのスキルテストを実行（必須）
+- 互換性レポート：
 
 ```
-Core updated: 0.5.0 → 0.8.0
-  ✓ All patches applied
+コアがアップデートされました： 0.5.0 → 0.8.0
+  ✓ すべてのパッチが適用されました
 
-  Migrations:
-    + apple-containers@1.0.0 (preserves container runtime)
-    + add-whatsapp@2.0.0 (WhatsApp moved to skill)
+  マイグレーション：
+    + apple-containers@1.0.0 (コンテナランタイムを維持)
+    + add-whatsapp@2.0.0 (WhatsApp をスキルに移動)
 
-  Skill updates:
-    ✓ add-telegram 1.0.0 → 1.2.0 (new features applied)
-    ✓ custom/telegram-group-only — re-applied cleanly
+  スキルの更新：
+    ✓ add-telegram 1.0.0 → 1.2.0 (新機能が適用されました)
+    ✓ custom/telegram-group-only — クリーンに再適用されました
 
-  ✓ All tests passing
+  ✓ すべてのテストに合格しました
 ```
 
-#### Step 13: Clean Up
+#### ステップ 13: クリーンアップ
 
-Delete `.nanoclaw/backup/`.
+`.nanoclaw/backup/` を削除します。
 
-### Progressive Core Slimming
+### 漸進的なコアのスリム化
 
-Migrations enable a clean path for slimming down the core over time. Each release can move more functionality to skills:
+マイグレーションにより、時間をかけてコアをスリム化していくクリーンな道筋が可能になります。リリースごとに、より多くの機能をスキルに移動できます：
 
-- The breaking change removes the feature from core
-- The migration skill preserves it for existing users
-- New users start with a minimal core and add what they need
-- Over time, `state.yaml` reflects exactly what each user is running
+- 破壊的変更によりコアから機能が削除される
+- マイグレーションスキルにより、既存ユーザーにはその機能が維持される
+- 新規ユーザーは最小限のコアから開始し、必要なものを追加する
+- 時間の経過とともに、`state.yaml` は各ユーザーが何を実行しているかを正確に反映するようになる
 
 ---
 
-## 11. Skill Removal (Uninstall)
+## 11. スキルの削除 (Uninstall)
 
-Removing a skill is not a reverse-patch operation. **Uninstall is a replay without the skill.**
+スキルの削除は、リバースパッチ操作ではありません。 **アンインストールとは、そのスキルを除いた再実行（replay）です。**
 
-### How It Works
+### 仕組み
 
-1. Read `state.yaml` to get the full list of applied skills and custom modifications
-2. Remove the target skill from the list
-3. Backup the current codebase to `.nanoclaw/backup/`
-4. **Replay from clean base** — apply each remaining skill in order, apply custom patches, using the resolution cache
-5. Run all tests
-6. If tests pass, delete backup and update `state.yaml`
-7. If tests fail, restore from backup and report
+1. `state.yaml` を読み込み、適用済みのスキルとカスタム修正の完全なリストを取得します。
+2. リストから対象のスキルを削除します。
+3. 現在のコードベースを `.nanoclaw/backup/` にバックアップします。
+4. **クリーンなベースから再実行します** — 解決キャッシュを使用しながら、残りの各スキルを順番に適用し、カスタムパッチを適用します。
+5. すべてのテストを実行します。
+6. テストに合格すれば、バックアップを削除し `state.yaml` を更新します。
+7. テストが失敗すれば、バックアップから復元し報告します。
 
-### Custom Patches Tied to the Removed Skill
+### 削除されるスキルに紐付いたカスタムパッチ
 
-If the removed skill has a `custom_patch` in `state.yaml`, the user is warned:
+削除されるスキルに `custom_patch` が `state.yaml` にある場合、ユーザーに警告が表示されます：
 
 ```
-Removing telegram will also discard custom patch: "Restrict bot responses to group chats only"
-[1] Continue (discard custom patch)
-[2] Abort
+telegram を削除すると、カスタムパッチ「ボットの応答をグループチャットのみに制限」も破棄されます。
+[1] 続行する (カスタムパッチを破棄)
+[2] 中止する
 ```
 
 ---
 
-## 12. Rebase
+## 12. リベース (Rebase)
 
-Flatten accumulated layers into a clean starting point.
+蓄積されたレイヤーを平坦化し、クリーンな開始点にします。
 
-### What Rebase Does
+### リベースが行うこと
 
-1. Takes the user's current actual files as the new reality
-2. Updates `.nanoclaw/base/` to the current core version's clean files
-3. For each applied skill, regenerates the modified file diffs against the new base
-4. Updates `state.yaml` with `rebased_at` timestamp
-5. Clears old custom patches (now baked in)
-6. Clears stale resolution cache entries
+1. ユーザーの現在の実際のファイルを「新しい現実」として採用します。
+2. `.nanoclaw/base/` を、現在のコアバージョンのクリーンなファイルに更新します。
+3. 適用済みの各スキルについて、新しいベースに対する修正済みファイルの差分を再生成します。
+4. `state.yaml` を `rebased_at` タイムスタンプで更新します。
+5. 古いカスタムパッチ（現在のファイルに組み込まれたもの）をクリアします。
+6. 古くなった解決キャッシュエントリをクリアします。
 
-### When to Rebase
+### リベースを行うタイミング
 
-- After a major core update
-- When accumulated patches become unwieldy
-- Before a significant new skill application
-- Periodically as maintenance
+- 大規模なコアアップデートの後
+- 蓄積されたパッチが扱いにくくなったとき
+- 重要な新しいスキルを適用する前
+- 定期的なメンテナンスとして
 
-### Tradeoffs
+### トレードオフ
 
-**Lose**: individual skill patch history, ability to cleanly remove a single old skill, old custom patches as separate artifacts
+**失うもの**: 個々のスキルのパッチ履歴、特定の古いスキルをクリーンに削除する能力、独立した成果物としての古いカスタムパッチ
 
-**Gain**: clean base, simpler future merges, reduced cache size, fresh starting point
+**得るもの**: クリーンなベース、将来のマージの簡素化、キャッシュサイズの削減、フレッシュな開始点
 
 ---
 
-## 13. Replay
+## 13. 再実行 (Replay)
 
-Given `state.yaml`, reproduce the exact installation on a fresh machine with no AI intervention (assuming all resolutions are cached).
+`state.yaml` があれば、AI の介入なしに（すべての解決策がキャッシュされている前提で）、フレッシュなマシン上に正確なインストール状態を再現します。
 
-### Replay Flow
+### 再実行フロー
 
 ```bash
-# Fully programmatic — no Claude Code needed
+# 完全にプログラム的 — Claude Code は不要
 
-# 1. Install core at specified version
+# 1. 指定されたバージョンのコアをインストール
 nanoclaw-init --version 0.5.0
 
-# 2. Load shared resolutions into local rerere cache
+# 2. 共有解決策をローカルの rerere キャッシュにロード
 load-resolutions .nanoclaw/resolutions/
 
-# 3. For each skill in applied_skills (in order):
+# 3. applied_skills 内の各スキルについて (順番に)：
 for skill in state.applied_skills:
-  # File operations
+  # ファイル操作
   apply_file_ops(skill)
 
-  # Copy new files
+  # 新規ファイルのコピー
   cp skills/${skill.name}/add/* .
 
-  # Merge modified code files (with path remapping)
+  # 修正されたコードファイルのマージ (パスリマッピングを適用)
   for file in skill.files_modified:
     resolved_path = apply_remap(file, state.path_remap)
     git merge-file ${resolved_path} .nanoclaw/base/${resolved_path} skills/${skill.name}/modify/${file}
-    # git rerere auto-resolves from shared cache if needed
+    # 必要に応じて git rerere が共有キャッシュから自動解決
 
-  # Apply skill-specific custom patch if recorded
+  # 記録されていればスキル固有のカスタムパッチを適用
   if skill.custom_patch:
     git apply --3way ${skill.custom_patch}
 
-# 4. Apply all structured operations (batched)
+# 4. すべての構造化操作を適用 (バッチ処理)
 collect_all_structured_ops(state.applied_skills)
-merge_npm_dependencies → write package.json once
-npm install once
-merge_env_additions → write .env.example once
-merge_compose_services → write docker-compose.yml once
+merge_npm_dependencies → package.json を一度書き込み
+npm install を一度実行
+merge_env_additions → .env.example を一度書き込み
+merge_compose_services → docker-compose.yml を一度書き込み
 
-# 5. Apply standalone custom modifications
+# 5. スタンドアロンのカスタム修正を適用
 for custom in state.custom_modifications:
   git apply --3way ${custom.patch_file}
 
-# 6. Run tests and verify hashes
+# 6. テストを実行しハッシュを検証
 run_tests && verify_hashes
 ```
 
 ---
 
-## 14. Skill Tests
+## 14. スキルテスト
 
-Each skill includes integration tests that validate the skill works correctly when applied.
+各スキルには、適用されたときに正しく動作することを検証する統合テストが含まれています。
 
-### Structure
+### 構造
 
 ```
 skills/
@@ -944,40 +946,40 @@ skills/
       whatsapp.test.ts
 ```
 
-### What Tests Validate
+### テストが検証すること
 
-- **Single skill on fresh core**: apply to clean codebase → tests pass → integration works
-- **Skill functionality**: the feature actually works
-- **Post-apply state**: files in expected state, `state.yaml` correctly updated
+- **フレッシュなコアへの単一スキルの適用**: クリーンなコードベースに適用 → テスト合格 → 統合が動作する
+- **スキルの機能**: 機能が実際に動作すること
+- **適用後の状態**: ファイルが期待通りの状態にあり、`state.yaml` が正しく更新されていること
 
-### When Tests Run (Always)
+### テストが実行されるタイミング (常に)
 
-- **After applying a skill** — even if all merges were clean
-- **After core update** — even if all merges were clean
-- **After uninstall replay** — confirms removal didn't break remaining skills
-- **In CI** — tests all official skills individually and in common combinations
-- **During replay** — validates replayed state
+- **スキルの適用後** — すべてのマージがクリーンであっても
+- **コアのアップデート後** — すべてのマージがクリーンであっても
+- **アンインストール後の再実行後** — 削除によって残りのスキルが壊れていないことを確認
+- **CI において** — すべての公式スキルを個別に、および一般的な組み合わせでテスト
+- **再実行（replay）中** — 再現された状態を検証
 
-Clean merge ≠ working code. Tests are the only reliable signal.
+クリーンなマージ ＝ 動作するコード、ではありません。テストだけが信頼できる信号です。
 
-### CI Test Matrix
+### CI テストマトリックス
 
-Test coverage is **smart, not exhaustive**:
+テストのカバレッジは**網羅的ではなくスマート**に行われます：
 
-- Every official skill individually against each supported core version
-- **Pairwise combinations for skills that modify at least one common file or have overlapping structured operations**
-- Curated three-skill stacks based on popularity and high overlap
-- Test matrix auto-generated from manifest `modifies` and `structured` fields
+- サポートされている各コアバージョンに対して、すべての公式スキルを個別にテスト
+- **少なくとも 1 つの共通ファイルを修正するスキル、または構造化操作が重なるスキルのペアの組み合わせ**をテスト
+- 人気や重なりに基づき、厳選された 3 つのスキルのスタックをテスト
+- テストマトリックスは、マニフェストの `modifies` および `structured` フィールドから自動生成されます
 
-Each passing combination generates a verified resolution entry for the shared cache.
+合格した各組み合わせについて、共有キャッシュ用の検証済み解決エントリが生成されます。
 
 ---
 
-## 15. Project Configuration
+## 15. プロジェクト設定
 
 ### `.gitattributes`
 
-Ship with NanoClaw to reduce noisy merge conflicts:
+ノイズの多いマージコンフリクトを減らすため、NanoClaw に同梱されます：
 
 ```
 * text=auto
@@ -989,17 +991,17 @@ Ship with NanoClaw to reduce noisy merge conflicts:
 
 ---
 
-## 16. Directory Structure
+## 16. ディレクトリ構造
 
 ```
 project/
-  src/                              # The actual codebase
+  src/                              # 実際のコードベース
     server.ts
     config.ts
     channels/
       whatsapp.ts
       telegram.ts
-  skills/                           # Skill packages (Claude Code slash commands)
+  skills/                           # スキルパッケージ (Claude Code スラッシュコマンド)
     add-whatsapp/
       SKILL.md
       manifest.yaml
@@ -1015,21 +1017,21 @@ project/
           config.ts.intent.md
     add-telegram/
       ...
-    telegram-reactions/             # Layered skill
+    telegram-reactions/             # レイヤースキル
       ...
   .nanoclaw/
-    base/                           # Clean core (shared base)
+    base/                           # クリーンなコア (共有ベース)
       src/
         server.ts
         config.ts
         ...
-    state.yaml                      # Full installation state
-    backup/                         # Temporary backup during operations
-    custom/                         # Custom patches
+    state.yaml                      # インストール状態の完全な記録
+    backup/                         # 操作中のテンポラリバックアップ
+    custom/                         # カスタムパッチ
       telegram-group-only.patch
       001-logging-middleware.patch
       001-logging-middleware.md
-    resolutions/                    # Shared verified resolution cache
+    resolutions/                    # 共有された検証済み解決キャッシュ
       whatsapp@1.2.0+telegram@1.0.0/
         src/
           server.ts.resolution
@@ -1040,24 +1042,24 @@ project/
 
 ---
 
-## 17. Design Principles
+## 17. 設計原則
 
-1. **Use git, don't reinvent it.** `git merge-file` for code merges, `git rerere` for caching resolutions, `git apply --3way` for custom patches.
-2. **Three-level resolution: git → Claude → user.** Programmatic first, AI second, human third.
-3. **Clean merges aren't enough.** Tests run after every operation. Semantic conflicts survive text merges.
-4. **All operations are safe.** Backup before, restore on failure. No half-applied state.
-5. **One shared base.** `.nanoclaw/base/` is the clean core before any skills or customizations. It's the stable common ancestor for all three-way merges. Only updated on core updates.
-6. **Code merges vs. structured operations.** Source code is three-way merged. Dependencies, env vars, and configs are aggregated programmatically. Structured operations are implicit and batched.
-7. **Resolutions are learned and shared.** Maintainers resolve conflicts and ship verified resolutions with hash enforcement. `.nanoclaw/resolutions/` is the shared artifact.
-8. **One skill, one happy path.** No predefined configuration options. Customization is more patching.
-9. **Skills layer and compose.** Core skills provide the foundation. Extension skills add capabilities.
-10. **Intent is first-class and structured.** `SKILL.md`, `.intent.md` (What, Invariants, Must-keep), and `migration.md`.
-11. **State is explicit and complete.** Skills, custom patches, per-file hashes, structured outcomes, path remaps. Replay is deterministic. Drift is instant to detect.
-12. **Always recoverable.** The three-level model reconstructs coherent state from any starting point.
-13. **Uninstall is replay.** Replay from clean base without the skill. Backup for safety.
-14. **Core updates are the maintainers' responsibility.** Test, resolve, ship. Breaking changes require a migration skill that preserves the old behavior. The cost of a breaking change is authoring and testing the migration. Users should never be surprised by a change to their setup.
-15. **File operations and path remapping are first-class.** Renames, deletes, moves in manifests. Skills are never mutated — paths resolve at apply time.
-16. **Skills are tested.** Integration tests per skill. CI tests pairwise by overlap. Tests run always.
-17. **Deterministic serialization.** Sorted keys, consistent formatting. No noisy diffs.
-18. **Rebase when needed.** Flatten layers for a clean starting point.
-19. **Progressive core slimming.** Breaking changes move functionality from core to migration skills. Existing users keep what they have automatically. New users start minimal and add what they need.
+1. **git を使い、再発明しない。** コードのマージには `git merge-file`、解決策のキャッシュには `git rerere`、カスタムパッチには `git apply --3way` を使用します。
+2. **3 段階の解決：git → Claude → ユーザー。** まずはプログラム、次に AI、最後が人間です。
+3. **クリーンなマージだけでは不十分。** すべての操作の後にテストを実行します。意味的な競合はテキストマージを生き残ります。
+4. **すべての操作は安全。** 操作前にバックアップし、失敗時には復元します。半分適用された状態を残しません。
+5. **唯一の共有ベース。** `.nanoclaw/base/` は、スキルやカスタマイズが適用される前のクリーンなコアです。これはすべての 3 ウェイマージにおける安定した共通の祖先です。コアのアップデート時にのみ更新されます。
+6. **コードマージ vs 構造化操作。** ソースコードは 3 ウェイマージされます。依存関係、環境変数、および設定はプログラムによって集約されます。構造化操作は暗黙的であり、一括処理されます。
+7. **解決策は学習され、共有される。** メンテナーがコンフリクトを解決し、ハッシュ強制を伴う検証済みの解決策を配布します。 `.nanoclaw/resolutions/` がその共有成果物です。
+8. **1 つのスキル、1 つのハッピーパス。** 定義済みの設定オプションは持ちません。カスタマイズはパッチに近い形で行われます。
+9. **スキルは重なり合い、構成される。** コアスキルが土台を提供し、拡張スキルが機能を追加します。
+10. **意図 (Intent) は第一級の市民であり、構造化されている。** `SKILL.md`, `.intent.md` (What, Invariants, Must-keep)、および `migration.md`。
+11. **状態は明示的かつ完全。** スキル、カスタムパッチ、ファイルごとのハッシュ、構造化された結果、パスリマップ。再実行は確定的です。ドリフトは即座に検出可能です。
+12. **常に復旧可能。** 3 段階モデルにより、どのような開始点からでも一貫した状態を再構築できます。
+13. **アンインストールは再実行。** スキルを除いた状態でクリーンなベースから再実行します。安全のためバックアップを作成します。
+14. **コアのアップデートはメンテナーの責任。** テストし、解決し、出荷します。破壊的変更には、古い動作を保持するマイグレーションスキルが必要です。破壊的変更のコストは、マイグレーションの作成とテストです。ユーザーがセットアップの変更に驚くことがあってはなりません。
+15. **ファイル操作とパスリマッピングは第一級の機能。** マニフェストでの名前変更、削除、移動。スキルは決して書き換えられず、適用時にパスが解決されます。
+16. **スキルはテストされる。** スキルごとの統合テスト。CI は重なりに基づいてペアでテストします。テストは常に実行されます。
+17. **確定的シリアライズ。** ソートされたキー、一貫したフォーマット。ノイズの多い差分を出しません。
+18. **必要なときにリベース。** レイヤーを平坦化してクリーンな開始点を作ります。
+19. **漸進的なコアのスリム化。** 破壊的変更により、機能をコアからマイグレーションスキルへと移動させます。既存ユーザーは現在の状態を自動的に維持し、新規ユーザーは最小限のコアから始めて必要なものを追加します。
