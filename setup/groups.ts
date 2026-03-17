@@ -1,8 +1,8 @@
 /**
- * Step: groups — Fetch group metadata from messaging platforms, write to DB.
- * WhatsApp requires an upfront sync (Baileys groupFetchAllParticipating).
- * Other channels discover group names at runtime — this step auto-skips for them.
- * Replaces 05-sync-groups.sh + 05b-list-groups.sh
+ * ステップ: groups — メッセージングプラットフォームからグループのメタデータを取得し、DB に書き込みます。
+ * WhatsApp は事前同期が必要です（Baileys の groupFetchAllParticipating）。
+ * 他のチャネルは実行時にグループ名を検出するため、このステップは自動的にスキップされます。
+ * 05-sync-groups.sh + 05b-list-groups.sh を置き換えるものです。
  */
 import { execSync } from 'child_process';
 import fs from 'fs';
@@ -43,7 +43,7 @@ async function listGroups(limit: number): Promise<void> {
   const dbPath = path.join(STORE_DIR, 'messages.db');
 
   if (!fs.existsSync(dbPath)) {
-    console.error('ERROR: database not found');
+    console.error('エラー: データベースが見つかりません');
     process.exit(1);
   }
 
@@ -64,14 +64,14 @@ async function listGroups(limit: number): Promise<void> {
 }
 
 async function syncGroups(projectRoot: string): Promise<void> {
-  // Only WhatsApp needs an upfront group sync; other channels resolve names at runtime.
-  // Detect WhatsApp by checking for auth credentials on disk.
+  // 事前のグループ同期が必要なのは WhatsApp のみです。他のチャネルは実行時に名前を解決します。
+  // ディスク上の認証情報の有無で WhatsApp を検出します。
   const authDir = path.join(projectRoot, 'store', 'auth');
   const hasWhatsAppAuth =
     fs.existsSync(authDir) && fs.readdirSync(authDir).length > 0;
 
   if (!hasWhatsAppAuth) {
-    logger.info('WhatsApp auth not found — skipping group sync');
+    logger.info('WhatsApp の認証情報が見つかりません — グループ同期をスキップします');
     emitStatus('SYNC_GROUPS', {
       BUILD: 'skipped',
       SYNC: 'skipped',
@@ -83,8 +83,8 @@ async function syncGroups(projectRoot: string): Promise<void> {
     return;
   }
 
-  // Build TypeScript first
-  logger.info('Building TypeScript');
+  // 最初に TypeScript をビルド
+  logger.info('TypeScript をビルド中');
   let buildOk = false;
   try {
     execSync('npm run build', {
@@ -92,9 +92,9 @@ async function syncGroups(projectRoot: string): Promise<void> {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     buildOk = true;
-    logger.info('Build succeeded');
+    logger.info('ビルド成功');
   } catch {
-    logger.error('Build failed');
+    logger.error('ビルド失敗');
     emitStatus('SYNC_GROUPS', {
       BUILD: 'failed',
       SYNC: 'skipped',
@@ -106,8 +106,8 @@ async function syncGroups(projectRoot: string): Promise<void> {
     process.exit(1);
   }
 
-  // Run sync script via a temp file to avoid shell escaping issues with node -e
-  logger.info('Fetching group metadata');
+  // node -e によるシェルのエスケープ問題を避けるため、一時ファイルを介して同期スクリプトを実行
+  logger.info('グループのメタデータを取得中');
   let syncOk = false;
   try {
     const syncScript = `
@@ -189,15 +189,15 @@ sock.ev.on('connection.update', async (update) => {
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       syncOk = output.includes('SYNCED:');
-      logger.info({ output: output.trim() }, 'Sync output');
+      logger.info({ output: output.trim() }, '同期出力');
     } finally {
-      try { fs.unlinkSync(tmpScript); } catch { /* ignore cleanup errors */ }
+      try { fs.unlinkSync(tmpScript); } catch { /* クリーンアップエラーは無視 */ }
     }
   } catch (err) {
-    logger.error({ err }, 'Sync failed');
+    logger.error({ err }, '同期失敗');
   }
 
-  // Count groups in DB using better-sqlite3 (no sqlite3 CLI)
+  // better-sqlite3 を使用して DB 内のグループをカウント（sqlite3 CLI は不使用）
   let groupsInDb = 0;
   const dbPath = path.join(STORE_DIR, 'messages.db');
   if (fs.existsSync(dbPath)) {
@@ -211,7 +211,7 @@ sock.ev.on('connection.update', async (update) => {
       groupsInDb = row.count;
       db.close();
     } catch {
-      // DB may not exist yet
+      // DB がまだ存在しない可能性あり
     }
   }
 
