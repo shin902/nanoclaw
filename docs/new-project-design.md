@@ -1,0 +1,261 @@
+# 新プロジェクト 要件定義・設計方針
+
+> NanoClawのコードリーディングから得た知見をベースに設計する。
+> まだ要件定義フェーズ。名前未定。
+
+---
+
+## 前提
+
+- **チャンネル**: Discordのみ（プライベートサーバー、身内のみ）
+- **ホスト環境**: Linux
+- **コンテナ**: あり（Bashコマンド・ネットワークアクセス含め全許可）
+- **データベース**: SQLなし、ファイルベース（JSONL / JSON）
+- **WebUI**: なし（設定変更はエージェントに頼むか手動）
+
+---
+
+## アーキテクチャ概要
+
+```
+Discord
+  ↓ メッセージ受信
+ホストプロセス
+  ↓ キューイング（チャンネルごとに直列化）
+コンテナ起動
+  ↓ stdin経由でプロンプト送信
+エージェントループ（自作 or Vercel AI SDK, Claude Agent SDK 等）
+  ↓ ツールコール実行・結果返却
+stdout経由で応答受信
+  ↓
+Discordに送信
+```
+
+---
+
+## チャンネル・グループ設計
+
+### グループ = Discordチャンネル1つ
+
+各グループは以下を持つ：
+
+- 独立したコンテナ（ファイルシステム・セッション隔離）
+- 独自の会話履歴（JSONLファイル）
+- 独自の設定（`config.json`）
+
+### isMainフラグ
+
+NanoClawの設計を踏襲して残す。mainグループは：
+
+- 他グループへのメッセージ送信が可能
+- 全タスクの管理が可能
+- グループの登録・管理が可能
+
+プライベートサーバーのため認可チェックは最小限でよい。
+
+**参考**: `nanoclaw/src/ipc.ts`
+
+---
+
+## ストレージ設計
+
+SQLなし。全てファイルベース。
+
+```
+data/
+  groups/
+    {channel-name}/
+      config.json          ← プロバイダー設定、トリガー設定等
+      2026-03-18.jsonl     ← その日の全イベント（会話 + ツールコール）
+      2026-03-19.jsonl
+  tasks/
+    active.json            ← アクティブなタスク一覧
+    2026-03-18.jsonl       ← その日のタスク実行ログ
+```
+
+### JSONLイベント形式
+
+1行1イベント。typeフィールドで統一。
+
+```
+{"type":"message","role":"user","content":"...","ts":1742000000}
+{"type":"message","role":"assistant","content":"...","ts":1742000001}
+{"type":"tool_call","tool":"bash","args":{...},"result":"...","ts":1742000002}
+{"type":"tool_call","tool":"read","args":{...},"result":"...","ts":1742000003}
+```
+
+### 日付またぎの会話継続
+
+プロバイダーへのコンテキスト構築時に「直近Nメッセージ」または「直近N日分」を読み込む。
+
+### タスクファイル
+
+タスクごとのファイル競合を避けるため、同時書き込みはキューで直列化。
+
+**参考**: `nanoclaw/src/task-scheduler.ts`
+
+---
+
+## プロバイダー設計
+
+### 対応プロバイダー（予定）
+
+| プロバイダー | 認証方式 | 備考 |
+|---|---|---|
+| Claude | Anthropic APIキー or OAuth | NanoClawと同方式 |
+| GitHub Copilot | GitHub Device Flow OAuth | openclaw実装を参考 |
+
+### プロバイダー切り替え
+
+`config.json`の`provider`フィールドを書き換えるだけ。
+`/model`スラッシュコマンドで変更可能。
+
+### Credential Proxy
+
+NanoClawと同じパターンを踏襲する。
+
+- ローカルHTTPサーバーを立てる
+- コンテナからのAPI呼び出しを横取りして本物のトークンを差し込む
+- コンテナ側には`placeholder`しか渡さない
+
+**参考**: `nanoclaw/src/credential-proxy.ts`
+
+### GitHub Copilot認証フロー
+
+openclaw（公式公認OSS）の実装を参考にする。
+
+1. GitHub Device Flow → `github_token`取得
+2. `GET /copilot_internal/v2/token` → `copilot_token`取得（短命）
+3. Copilot APIトークンをキャッシュ・自動更新
+4. OpenAI互換エンドポイントへ転送
+
+**参考**:
+- `nanoclaw/docs/copilot/copilot-oauth-opencode.md`
+- `nanoclaw/docs/copilot/copilot-oauth-openclaw.md`
+
+---
+
+## エージェントループ
+
+### 方針
+
+素のAPI呼び出しベースで自作。SDKは未定（Vercel AI SDK等を検討）。
+
+ループの基本構造：
+
+1. プロンプト送信
+2. レスポンス受信
+3. ツールコールがあれば実行
+4. 結果をAPIに返す
+5. 完了するまで2〜4を繰り返す
+
+### Agent Teams
+
+不採用。素のAPI呼び出しでは実装コストが高く、ユースケースも限定的。
+
+**参考（採用しないが設計理解のため）**: `nanoclaw/container/agent-runner/src/index.ts`
+
+---
+
+## キュー・並行制御
+
+NanoClawのGroupQueueをほぼ流用する。
+
+- チャンネル（グループ）ごとに同時コンテナ1つに制限
+- タスクがメッセージより優先される
+- 全体の同時コンテナ数上限あり（Linux・Pi環境を考慮して小さめ）
+- 失敗時は指数バックオフでリトライ（最大5回）
+
+**参考**: `nanoclaw/src/group-queue.ts`
+
+---
+
+## スケジュールタスク
+
+### スケジュール種別
+
+| タイプ | 例 | 動作 |
+|---|---|---|
+| `cron` | `"0 9 * * *"` | cron式で次回を計算 |
+| `interval` | `"3600000"` | 前回予定時刻+ms（ドリフト防止） |
+| `once` | ISO日時 | 一度だけ実行 |
+
+### タスクの内容
+
+- Claudeへのプロンプト（自然言語で指示）
+- Bashコマンド直接実行（コンテナ内）
+
+### タスク登録方法
+
+エージェントにDiscordで依頼 → IPCファイル経由でホストに伝達 → `active.json`に書き込み
+
+**参考**: `nanoclaw/src/task-scheduler.ts`
+
+---
+
+## IPC設計
+
+コンテナ→ホスト間の通信はファイルベース。コンテナがJSONファイルをIPCディレクトリに置く、ホストが定期的に拾って処理する。
+
+### コマンド種別（予定）
+
+| type | 内容 |
+|---|---|
+| `schedule_task` | タスク登録 |
+| `pause_task` | タスク一時停止 |
+| `resume_task` | タスク再開 |
+| `cancel_task` | タスク削除 |
+| `update_task` | タスク更新 |
+| `update_config` | プロバイダー等の設定変更（追加予定） |
+| `send_message` | 他チャンネルへのメッセージ送信（mainのみ） |
+
+**参考**: `nanoclaw/src/ipc.ts`
+
+---
+
+## Discordスラッシュコマンド
+
+| コマンド | 動作 |
+|---|---|
+| `/new` | セッションリセット（ホスト側でセッションIDをクリア） |
+| `/model` | プロバイダー切り替え（`config.json`を書き換え） |
+| `/compact` | 会話履歴の圧縮（SDK依存、要検討） |
+
+---
+
+## メッセージフォーマット
+
+NanoClawのXMLフォーマットを踏襲。プロバイダー問わず使える。
+
+```xml
+<context timezone="Asia/Tokyo" />
+<messages>
+<message sender="shin" time="09:00">おはよう</message>
+</messages>
+```
+
+`<internal>...</internal>`タグはユーザーへの送信前に除去。
+
+**参考**: `nanoclaw/src/router.ts`
+
+---
+
+## コンテナ設計
+
+NanoClawのコンテナ設計を踏襲。
+
+- コンテナ内は全権限（Bash・ネットワーク含め全許可）
+- Credential Proxy経由でAPIアクセス（本物のトークンはコンテナに渡さない）
+- グループフォルダをマウント（会話履歴・設定ファイルの永続化）
+- mainグループはプロジェクトルートも読み取り専用でマウント
+
+**参考**: `nanoclaw/src/container-runner.ts`
+
+---
+
+## 未決定事項
+
+- [ ] プロジェクト名
+- [ ] SDKの選定（Vercel AI SDK vs 完全自作）
+- [ ] `/compact`の実装方法（SDK依存度による）
+- [ ] Copilot以外の追加プロバイダー（Gemini等）
