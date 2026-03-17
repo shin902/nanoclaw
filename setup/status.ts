@@ -1,6 +1,6 @@
 /**
- * Structured status block output for setup steps.
- * Each step emits a block that the SKILL.md LLM can parse.
+ * セットアップステップ用の構造化されたステータスブロック出力。
+ * 各ステップは SKILL.md の LLM がパース可能なブロックを出力します。
  */
 
 export function emitStatus(
