@@ -1,6 +1,6 @@
 /**
- * Convert a UTC ISO timestamp to a localized display string.
- * Uses the Intl API (no external dependencies).
+ * UTC ISO タイムスタンプをローカライズされた表示文字列に変換します。
+ * Intl API を使用します（外部依存なし）。
  */
 export function formatLocalTime(utcIso: string, timezone: string): string {
   const date = new Date(utcIso);
