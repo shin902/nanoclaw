@@ -1,7 +1,7 @@
 /**
- * Stdio MCP Server for NanoClaw
- * Standalone process that agent teams subagents can inherit.
- * Reads context from environment variables, writes IPC files for the host.
+ * NanoClaw 用 Stdio MCP サーバー
+ * エージェントチームのサブエージェントが継承できるスタンドアロンプロセス。
+ * 環境変数からコンテキストを読み取り、ホスト用の IPC ファイルを書き出します。
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -15,7 +15,7 @@ const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 
-// Context from environment variables (set by the agent runner)
+// 環境変数からのコンテキスト（エージェントランナーによって設定されます）
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
@@ -26,7 +26,7 @@ function writeIpcFile(dir: string, data: object): string {
   const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
   const filepath = path.join(dir, filename);
 
-  // Atomic write: temp file then rename
+  // アトミックな書き込み: 一時ファイルを作成してからリネーム
   const tempPath = `${filepath}.tmp`;
   fs.writeFileSync(tempPath, JSON.stringify(data, null, 2));
   fs.renameSync(tempPath, filepath);
@@ -41,10 +41,10 @@ const server = new McpServer({
 
 server.tool(
   'send_message',
-  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times.",
+  '実行中に、ユーザーまたはグループに即座にメッセージを送信します。進捗状況の報告や、複数のメッセージを送信する場合に使用してください。このツールは複数回呼び出すことができます。',
   {
-    text: z.string().describe('The message text to send'),
-    sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
+    text: z.string().describe('送信するメッセージ本文'),
+    sender: z.string().optional().describe('あなたの役割/識別名（例: "調査員"）。設定すると、Telegram では専用のボットからのメッセージとして表示されます。'),
   },
   async (args) => {
     const data: Record<string, string | undefined> = {
@@ -58,48 +58,48 @@ server.tool(
 
     writeIpcFile(MESSAGES_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
+    return { content: [{ type: 'text' as const, text: 'メッセージを送信しました。' }] };
   },
 );
 
 server.tool(
   'schedule_task',
-  `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools. Returns the task ID for future reference. To modify an existing task, use update_task instead.
+  `定期実行または単発のタスクをスケジュールします。タスクは、すべてのツールにアクセスできるフル機能のエージェントとして実行されます。後で参照するためのタスク ID を返します。既存のタスクを修正するには、代わりに update_task を使用してください。
 
-CONTEXT MODE - Choose based on task type:
-\u2022 "group": Task runs in the group's conversation context, with access to chat history. Use for tasks that need context about ongoing discussions, user preferences, or recent interactions.
-\u2022 "isolated": Task runs in a fresh session with no conversation history. Use for independent tasks that don't need prior context. When using isolated mode, include all necessary context in the prompt itself.
+コンテキストモード - タスクのタイプに合わせて選択してください:
+\u2022 "group": グループの会話コンテキスト内で実行され、チャット履歴にアクセスできます。進行中の議論、ユーザーの好み、最近のやり取りに関するコンテキストが必要なタスクに使用してください。
+\u2022 "isolated": 会話履歴のない新しいセッションで実行されます。以前のコンテキストを必要としない独立したタスクに使用してください。isolated モードを使用する場合は、必要なすべてのコンテキストをプロンプト自体に含めてください。
 
-If unsure which mode to use, you can ask the user. Examples:
-- "Remind me about our discussion" \u2192 group (needs conversation context)
-- "Check the weather every morning" \u2192 isolated (self-contained task)
-- "Follow up on my request" \u2192 group (needs to know what was requested)
-- "Generate a daily report" \u2192 isolated (just needs instructions in prompt)
+どちらのモードを使用すべきか不明な場合は、ユーザーに尋ねることができます。例:
+- "私たちの議論について思い出させて" \u2192 group (会話コンテキストが必要)
+- "毎朝の天気をチェックして" \u2192 isolated (自己完結型のタスク)
+- "私の依頼をフォローアップして" \u2192 group (何を依頼されたか知る必要がある)
+- "日報を生成して" \u2192 isolated (プロンプト内の指示だけで十分)
 
-MESSAGING BEHAVIOR - The task agent's output is sent to the user or group. It can also use send_message for immediate delivery, or wrap output in <internal> tags to suppress it. Include guidance in the prompt about whether the agent should:
-\u2022 Always send a message (e.g., reminders, daily briefings)
-\u2022 Only send a message when there's something to report (e.g., "notify me if...")
-\u2022 Never send a message (background maintenance tasks)
+メッセージング動作 - タスクエージェントの出力はユーザーまたはグループに送信されます。即座に配信するために send_message を使用したり、出力を <internal> タグで囲んで抑制したりすることもできます。エージェントが以下をすべきかについて、プロンプトにガイダンスを含めてください:
+\u2022 常にメッセージを送信する（例：リマインダー、日次のブリーフィング）
+\u2022 報告すべきことがあるときだけメッセージを送信する（例：「〜の場合に通知して」）
+\u2022 決してメッセージを送信しない（バックグラウンドのメンテナンスプロセス）
 
-SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
-\u2022 cron: Standard cron expression (e.g., "*/5 * * * *" for every 5 minutes, "0 9 * * *" for daily at 9am LOCAL time)
-\u2022 interval: Milliseconds between runs (e.g., "300000" for 5 minutes, "3600000" for 1 hour)
-\u2022 once: Local time WITHOUT "Z" suffix (e.g., "2026-02-01T15:30:00"). Do NOT use UTC/Z suffix.`,
+スケジュール値の形式 (すべてローカルタイムゾーンです):
+\u2022 cron: 標準の cron 式（例：5分おきなら "*/5 * * * *"、毎日ローカル時間の午前9時なら "0 9 * * *"）
+\u2022 interval: 実行間のミリ秒数（例：5分なら "300000"、1時間なら "3600000"）
+\u2022 once: "Z" サフィックスなしのローカル時間（例: "2026-02-01T15:30:00"）。UTC/Z サフィックスは使用しないでください。`,
   {
-    prompt: z.string().describe('What the agent should do when the task runs. For isolated mode, include all necessary context here.'),
-    schedule_type: z.enum(['cron', 'interval', 'once']).describe('cron=recurring at specific times, interval=recurring every N ms, once=run once at specific time'),
-    schedule_value: z.string().describe('cron: "*/5 * * * *" | interval: milliseconds like "300000" | once: local timestamp like "2026-02-01T15:30:00" (no Z suffix!)'),
-    context_mode: z.enum(['group', 'isolated']).default('group').describe('group=runs with chat history and memory, isolated=fresh session (include context in prompt)'),
-    target_group_jid: z.string().optional().describe('(Main group only) JID of the group to schedule the task for. Defaults to the current group.'),
+    prompt: z.string().describe('タスク実行時にエージェントがすべきこと。isolated モードの場合は、ここに必要なすべてのコンテキストを含めてください。'),
+    schedule_type: z.enum(['cron', 'interval', 'once']).describe('cron=特定の時刻に定期実行、interval=指定したミリ秒ごと、once=特定の時刻に一度だけ実行'),
+    schedule_value: z.string().describe('cron: "*/5 * * * *" | interval: "300000" などのミリ秒 | once: "2026-02-01T15:30:00" などのローカルタイムスタンプ（Zサフィックス禁止！）'),
+    context_mode: z.enum(['group', 'isolated']).default('group').describe('group=チャット履歴とメモリを使用して実行、isolated=新規セッション（プロンプトにコンテキストを含めること）'),
+    target_group_jid: z.string().optional().describe('(メイングループのみ) タスクをスケジュールする対象グループの JID。デフォルトは現在のグループ。'),
   },
   async (args) => {
-    // Validate schedule_value before writing IPC
+    // IPC 書き出し前に schedule_value を検証
     if (args.schedule_type === 'cron') {
       try {
         CronExpressionParser.parse(args.schedule_value);
       } catch {
         return {
-          content: [{ type: 'text' as const, text: `Invalid cron: "${args.schedule_value}". Use format like "0 9 * * *" (daily 9am) or "*/5 * * * *" (every 5 min).` }],
+          content: [{ type: 'text' as const, text: `無効な cron です: "${args.schedule_value}"。"0 9 * * *" (毎日午前9時) や "*/5 * * * *" (5分おき) のような形式を使用してください。` }],
           isError: true,
         };
       }
@@ -107,27 +107,27 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       const ms = parseInt(args.schedule_value, 10);
       if (isNaN(ms) || ms <= 0) {
         return {
-          content: [{ type: 'text' as const, text: `Invalid interval: "${args.schedule_value}". Must be positive milliseconds (e.g., "300000" for 5 min).` }],
+          content: [{ type: 'text' as const, text: `無効なインターバルです: "${args.schedule_value}"。正のミリ秒を指定してください（例: 5分なら "300000"）。` }],
           isError: true,
         };
       }
     } else if (args.schedule_type === 'once') {
       if (/[Zz]$/.test(args.schedule_value) || /[+-]\d{2}:\d{2}$/.test(args.schedule_value)) {
         return {
-          content: [{ type: 'text' as const, text: `Timestamp must be local time without timezone suffix. Got "${args.schedule_value}" — use format like "2026-02-01T15:30:00".` }],
+          content: [{ type: 'text' as const, text: `タイムスタンプはタイムゾーンサフィックスなしのローカル時間である必要があります。"${args.schedule_value}" が指定されました。"2026-02-01T15:30:00" のような形式を使用してください。` }],
           isError: true,
         };
       }
       const date = new Date(args.schedule_value);
       if (isNaN(date.getTime())) {
         return {
-          content: [{ type: 'text' as const, text: `Invalid timestamp: "${args.schedule_value}". Use local time format like "2026-02-01T15:30:00".` }],
+          content: [{ type: 'text' as const, text: `無効なタイムスタンプです: "${args.schedule_value}"。"2026-02-01T15:30:00" のようなローカル時間の形式を使用してください。` }],
           isError: true,
         };
       }
     }
 
-    // Non-main groups can only schedule for themselves
+    // メイン以外のグループは自分自身に対してのみスケジュール可能
     const targetJid = isMain && args.target_group_jid ? args.target_group_jid : chatJid;
 
     const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -147,21 +147,21 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
     writeIpcFile(TASKS_DIR, data);
 
     return {
-      content: [{ type: 'text' as const, text: `Task ${taskId} scheduled: ${args.schedule_type} - ${args.schedule_value}` }],
+      content: [{ type: 'text' as const, text: `タスク ${taskId} をスケジュールしました: ${args.schedule_type} - ${args.schedule_value}` }],
     };
   },
 );
 
 server.tool(
   'list_tasks',
-  "List all scheduled tasks. From main: shows all tasks. From other groups: shows only that group's tasks.",
+  'スケジュールされているすべてのタスクを一覧表示します。メイングループからはすべてのタスクが表示されます。他のグループからは、そのグループ自身のタスクのみが表示されます。',
   {},
   async () => {
     const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
 
     try {
       if (!fs.existsSync(tasksFile)) {
-        return { content: [{ type: 'text' as const, text: 'No scheduled tasks found.' }] };
+        return { content: [{ type: 'text' as const, text: 'スケジュールされたタスクは見つかりませんでした。' }] };
       }
 
       const allTasks = JSON.parse(fs.readFileSync(tasksFile, 'utf-8'));
@@ -171,7 +171,7 @@ server.tool(
         : allTasks.filter((t: { groupFolder: string }) => t.groupFolder === groupFolder);
 
       if (tasks.length === 0) {
-        return { content: [{ type: 'text' as const, text: 'No scheduled tasks found.' }] };
+        return { content: [{ type: 'text' as const, text: 'スケジュールされたタスクは見つかりませんでした。' }] };
       }
 
       const formatted = tasks
@@ -181,10 +181,10 @@ server.tool(
         )
         .join('\n');
 
-      return { content: [{ type: 'text' as const, text: `Scheduled tasks:\n${formatted}` }] };
+      return { content: [{ type: 'text' as const, text: `スケジュールされたタスク:\n${formatted}` }] };
     } catch (err) {
       return {
-        content: [{ type: 'text' as const, text: `Error reading tasks: ${err instanceof Error ? err.message : String(err)}` }],
+        content: [{ type: 'text' as const, text: `タスクの読み込みエラー: ${err instanceof Error ? err.message : String(err)}` }],
       };
     }
   },
@@ -192,8 +192,8 @@ server.tool(
 
 server.tool(
   'pause_task',
-  'Pause a scheduled task. It will not run until resumed.',
-  { task_id: z.string().describe('The task ID to pause') },
+  'スケジュールされたタスクを一時停止します。再開されるまで実行されません。',
+  { task_id: z.string().describe('一時停止するタスクの ID') },
   async (args) => {
     const data = {
       type: 'pause_task',
@@ -205,14 +205,14 @@ server.tool(
 
     writeIpcFile(TASKS_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} pause requested.` }] };
+    return { content: [{ type: 'text' as const, text: `タスク ${args.task_id} の一時停止をリクエストしました。` }] };
   },
 );
 
 server.tool(
   'resume_task',
-  'Resume a paused task.',
-  { task_id: z.string().describe('The task ID to resume') },
+  '一時停止中のタスクを再開します。',
+  { task_id: z.string().describe('再開するタスクの ID') },
   async (args) => {
     const data = {
       type: 'resume_task',
@@ -224,14 +224,14 @@ server.tool(
 
     writeIpcFile(TASKS_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} resume requested.` }] };
+    return { content: [{ type: 'text' as const, text: `タスク ${args.task_id} の再開をリクエストしました。` }] };
   },
 );
 
 server.tool(
   'cancel_task',
-  'Cancel and delete a scheduled task.',
-  { task_id: z.string().describe('The task ID to cancel') },
+  'スケジュールされたタスクをキャンセルして削除します。',
+  { task_id: z.string().describe('削除するタスクの ID') },
   async (args) => {
     const data = {
       type: 'cancel_task',
@@ -243,28 +243,28 @@ server.tool(
 
     writeIpcFile(TASKS_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} cancellation requested.` }] };
+    return { content: [{ type: 'text' as const, text: `タスク ${args.task_id} のキャンセルをリクエストしました。` }] };
   },
 );
 
 server.tool(
   'update_task',
-  'Update an existing scheduled task. Only provided fields are changed; omitted fields stay the same.',
+  '既存のスケジュールタスクを更新します。指定されたフィールドのみが変更され、省略されたフィールドはそのまま保持されます。',
   {
-    task_id: z.string().describe('The task ID to update'),
-    prompt: z.string().optional().describe('New prompt for the task'),
-    schedule_type: z.enum(['cron', 'interval', 'once']).optional().describe('New schedule type'),
-    schedule_value: z.string().optional().describe('New schedule value (see schedule_task for format)'),
+    task_id: z.string().describe('更新するタスクの ID'),
+    prompt: z.string().optional().describe('タスクの新しいプロンプト'),
+    schedule_type: z.enum(['cron', 'interval', 'once']).optional().describe('新しいスケジュールタイプ'),
+    schedule_value: z.string().optional().describe('新しいスケジュール値（形式については schedule_task を参照）'),
   },
   async (args) => {
-    // Validate schedule_value if provided
+    // スケジュール値が提供されている場合は検証
     if (args.schedule_type === 'cron' || (!args.schedule_type && args.schedule_value)) {
       if (args.schedule_value) {
         try {
           CronExpressionParser.parse(args.schedule_value);
         } catch {
           return {
-            content: [{ type: 'text' as const, text: `Invalid cron: "${args.schedule_value}".` }],
+            content: [{ type: 'text' as const, text: `無効な cron です: "${args.schedule_value}"。` }],
             isError: true,
           };
         }
@@ -274,7 +274,7 @@ server.tool(
       const ms = parseInt(args.schedule_value, 10);
       if (isNaN(ms) || ms <= 0) {
         return {
-          content: [{ type: 'text' as const, text: `Invalid interval: "${args.schedule_value}".` }],
+          content: [{ type: 'text' as const, text: `無効なインターバルです: "${args.schedule_value}"。` }],
           isError: true,
         };
       }
@@ -293,25 +293,25 @@ server.tool(
 
     writeIpcFile(TASKS_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} update requested.` }] };
+    return { content: [{ type: 'text' as const, text: `タスク ${args.task_id} の更新をリクエストしました。` }] };
   },
 );
 
 server.tool(
   'register_group',
-  `Register a new chat/group so the agent can respond to messages there. Main group only.
+  `新しいチャット/グループを登録して、エージェントがそこでメッセージに応答できるようにします。メイングループのみが実行可能です。
 
-Use available_groups.json to find the JID for a group. The folder name must be channel-prefixed: "{channel}_{group-name}" (e.g., "whatsapp_family-chat", "telegram_dev-team", "discord_general"). Use lowercase with hyphens for the group name part.`,
+グループの JID を見つけるには available_groups.json を使用してください。フォルダ名はチャネルプレフィックス付きの "{channel}_{group-name}" 形式にする必要があります（例: "whatsapp_family-chat", "telegram_dev-team", "discord_general"）。グループ名の部分にはハイフン付きの小文字を使用してください。`,
   {
-    jid: z.string().describe('The chat JID (e.g., "120363336345536173@g.us", "tg:-1001234567890", "dc:1234567890123456")'),
-    name: z.string().describe('Display name for the group'),
-    folder: z.string().describe('Channel-prefixed folder name (e.g., "whatsapp_family-chat", "telegram_dev-team")'),
-    trigger: z.string().describe('Trigger word (e.g., "@Andy")'),
+    jid: z.string().describe('チャットの JID（例: "120363336345536173@g.us", "tg:-1001234567890", "dc:1234567890123456"）'),
+    name: z.string().describe('グループの表示名'),
+    folder: z.string().describe('チャネルプレフィックス付きのフォルダ名（例: "whatsapp_family-chat", "telegram_dev-team"）'),
+    trigger: z.string().describe('トリガーワード（例: "@Andy"）'),
   },
   async (args) => {
     if (!isMain) {
       return {
-        content: [{ type: 'text' as const, text: 'Only the main group can register new groups.' }],
+        content: [{ type: 'text' as const, text: '新しいグループの登録はメイングループのみが可能です。' }],
         isError: true,
       };
     }
@@ -328,11 +328,11 @@ Use available_groups.json to find the JID for a group. The folder name must be c
     writeIpcFile(TASKS_DIR, data);
 
     return {
-      content: [{ type: 'text' as const, text: `Group "${args.name}" registered. It will start receiving messages immediately.` }],
+      content: [{ type: 'text' as const, text: `グループ "${args.name}" を登録しました。即座にメッセージの受信が開始されます。` }],
     };
   },
 );
 
-// Start the stdio transport
+// stdio トランスポートを開始
 const transport = new StdioServerTransport();
 await server.connect(transport);
