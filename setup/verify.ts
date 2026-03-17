@@ -1,8 +1,8 @@
 /**
- * Step: verify — End-to-end health check of the full installation.
- * Replaces 09-verify.sh
+ * ステップ: verify — インストール全体のヘルスチェック。
+ * 09-verify.sh を置き換えるものです。
  *
- * Uses better-sqlite3 directly (no sqlite3 CLI), platform-aware service checks.
+ * better-sqlite3 を直接使用し（sqlite3 CLI は不使用）、プラットフォームを考慮したサービスチェックを行います。
  */
 import { execSync } from 'child_process';
 import fs from 'fs';
@@ -27,9 +27,9 @@ export async function run(_args: string[]): Promise<void> {
   const platform = getPlatform();
   const homeDir = os.homedir();
 
-  logger.info('Starting verification');
+  logger.info('検証を開始します');
 
-  // 1. Check service status
+  // 1. サービスのステータスを確認
   let service = 'not_found';
   const mgr = getServiceManager();
 
@@ -37,7 +37,7 @@ export async function run(_args: string[]): Promise<void> {
     try {
       const output = execSync('launchctl list', { encoding: 'utf-8' });
       if (output.includes('com.nanoclaw')) {
-        // Check if it has a PID (actually running)
+        // PID があるか確認（実際に実行中か）
         const line = output.split('\n').find((l) => l.includes('com.nanoclaw'));
         if (line) {
           const pidField = line.trim().split(/\s+/)[0];
@@ -45,7 +45,7 @@ export async function run(_args: string[]): Promise<void> {
         }
       }
     } catch {
-      // launchctl not available
+      // launchctl が利用不可
     }
   } else if (mgr === 'systemd') {
     const prefix = isRoot() ? 'systemctl' : 'systemctl --user';
@@ -61,11 +61,11 @@ export async function run(_args: string[]): Promise<void> {
           service = 'stopped';
         }
       } catch {
-        // systemctl not available
+        // systemctl が利用不可
       }
     }
   } else {
-    // Check for nohup PID file
+    // nohup の PID ファイルを確認
     const pidFile = path.join(projectRoot, 'nanoclaw.pid');
     if (fs.existsSync(pidFile)) {
       try {
@@ -80,9 +80,9 @@ export async function run(_args: string[]): Promise<void> {
       }
     }
   }
-  logger.info({ service }, 'Service status');
+  logger.info({ service }, 'サービスステータス');
 
-  // 2. Check container runtime
+  // 2. コンテナランタイムを確認
   let containerRuntime = 'none';
   try {
     execSync('command -v container', { stdio: 'ignore' });
@@ -92,11 +92,11 @@ export async function run(_args: string[]): Promise<void> {
       execSync('docker info', { stdio: 'ignore' });
       containerRuntime = 'docker';
     } catch {
-      // No runtime
+      // ランタイムなし
     }
   }
 
-  // 3. Check credentials
+  // 3. 認証情報を確認
   let credentials = 'missing';
   const envFile = path.join(projectRoot, '.env');
   if (fs.existsSync(envFile)) {
@@ -106,7 +106,7 @@ export async function run(_args: string[]): Promise<void> {
     }
   }
 
-  // 4. Check channel auth (detect configured channels by credentials)
+  // 4. チャネル認証を確認（認証情報に基づいて設定済みチャネルを検出）
   const envVars = readEnvFile([
     'TELEGRAM_BOT_TOKEN',
     'SLACK_BOT_TOKEN',
@@ -116,13 +116,13 @@ export async function run(_args: string[]): Promise<void> {
 
   const channelAuth: Record<string, string> = {};
 
-  // WhatsApp: check for auth credentials on disk
+  // WhatsApp: ディスク上の認証情報を確認
   const authDir = path.join(projectRoot, 'store', 'auth');
   if (fs.existsSync(authDir) && fs.readdirSync(authDir).length > 0) {
     channelAuth.whatsapp = 'authenticated';
   }
 
-  // Token-based channels: check .env
+  // トークンベースのチャネル: .env を確認
   if (process.env.TELEGRAM_BOT_TOKEN || envVars.TELEGRAM_BOT_TOKEN) {
     channelAuth.telegram = 'configured';
   }
@@ -139,8 +139,8 @@ export async function run(_args: string[]): Promise<void> {
   const configuredChannels = Object.keys(channelAuth);
   const anyChannelConfigured = configuredChannels.length > 0;
 
-  // 5. Check registered groups (using better-sqlite3, not sqlite3 CLI)
-  let registeredGroups = 0;
+  // 5. 登録済みグループを確認（sqlite3 CLI ではなく better-sqlite3 を使用）
+  let registeredGroupsCount = 0;
   const dbPath = path.join(STORE_DIR, 'messages.db');
   if (fs.existsSync(dbPath)) {
     try {
@@ -148,14 +148,14 @@ export async function run(_args: string[]): Promise<void> {
       const row = db
         .prepare('SELECT COUNT(*) as count FROM registered_groups')
         .get() as { count: number };
-      registeredGroups = row.count;
+      registeredGroupsCount = row.count;
       db.close();
     } catch {
-      // Table might not exist
+      // テーブルが存在しない可能性あり
     }
   }
 
-  // 6. Check mount allowlist
+  // 6. マウント許可リストを確認
   let mountAllowlist = 'missing';
   if (
     fs.existsSync(
@@ -165,16 +165,16 @@ export async function run(_args: string[]): Promise<void> {
     mountAllowlist = 'configured';
   }
 
-  // Determine overall status
+  // 全体のステータスを決定
   const status =
     service === 'running' &&
     credentials !== 'missing' &&
     anyChannelConfigured &&
-    registeredGroups > 0
+    registeredGroupsCount > 0
       ? 'success'
       : 'failed';
 
-  logger.info({ status, channelAuth }, 'Verification complete');
+  logger.info({ status, channelAuth }, '検証完了');
 
   emitStatus('VERIFY', {
     SERVICE: service,
@@ -182,7 +182,7 @@ export async function run(_args: string[]): Promise<void> {
     CREDENTIALS: credentials,
     CONFIGURED_CHANNELS: configuredChannels.join(','),
     CHANNEL_AUTH: JSON.stringify(channelAuth),
-    REGISTERED_GROUPS: registeredGroups,
+    REGISTERED_GROUPS: registeredGroupsCount,
     MOUNT_ALLOWLIST: mountAllowlist,
     STATUS: status,
     LOG: 'logs/setup.log',
