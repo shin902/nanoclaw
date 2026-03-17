@@ -1,6 +1,6 @@
 /**
- * Container Runner for NanoClaw
- * Spawns agent execution in containers and handles IPC
+ * NanoClaw 用コンテナランナー
+ * コンテナ内でのエージェントの実行を開始し、IPC を処理します
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
@@ -29,7 +29,7 @@ import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
-// Sentinel markers for robust output parsing (must match agent-runner)
+// 堅牢な出力パースのためのセンチネルマーカー (agent-runner と一致させる必要があります)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
@@ -65,19 +65,20 @@ function buildVolumeMounts(
   const groupDir = resolveGroupFolderPath(group.folder);
 
   if (isMain) {
-    // Main gets the project root read-only. Writable paths the agent needs
-    // (group folder, IPC, .claude/) are mounted separately below.
-    // Read-only prevents the agent from modifying host application code
-    // (src/, dist/, package.json, etc.) which would bypass the sandbox
-    // entirely on next restart.
+    // メイングループにはプロジェクトルートを読み取り専用でマウントします。
+    // エージェントが必要とする書き込み可能なパス（グループフォルダ、IPC、.claude/）は、
+    // 以下で個別にマウントされます。読み取り専用にすることで、エージェントが
+    // ホスト上のアプリケーションコード（src/, dist/, package.json など）を
+    // 修正し、次回の起動時にサンドボックスを完全に回避するのを防ぎます。
     mounts.push({
       hostPath: projectRoot,
       containerPath: '/workspace/project',
       readonly: true,
     });
 
-    // Shadow .env so the agent cannot read secrets from the mounted project root.
-    // Credentials are injected by the credential proxy, never exposed to containers.
+    // エージェントがマウントされたプロジェクトルートからシークレットを読み取れないように
+    // .env を隠します。認証情報は認証情報プロキシによって注入され、
+    // コンテナに直接さらされることはありません。
     const envFile = path.join(projectRoot, '.env');
     if (fs.existsSync(envFile)) {
       mounts.push({
@@ -87,22 +88,22 @@ function buildVolumeMounts(
       });
     }
 
-    // Main also gets its group folder as the working directory
+    // メイングループは、自身のグループフォルダを作業ディレクトリとしても取得します
     mounts.push({
       hostPath: groupDir,
       containerPath: '/workspace/group',
       readonly: false,
     });
   } else {
-    // Other groups only get their own folder
+    // その他のグループは、自身のフォルダのみを取得します
     mounts.push({
       hostPath: groupDir,
       containerPath: '/workspace/group',
       readonly: false,
     });
 
-    // Global memory directory (read-only for non-main)
-    // Only directory mounts are supported, not file mounts
+    // グローバルメモリディレクトリ（メイン以外には読み取り専用）
+    // ディレクトリマウントのみがサポートされており、ファイルマウントはサポートされていません
     const globalDir = path.join(GROUPS_DIR, 'global');
     if (fs.existsSync(globalDir)) {
       mounts.push({
@@ -113,8 +114,8 @@ function buildVolumeMounts(
     }
   }
 
-  // Per-group Claude sessions directory (isolated from other groups)
-  // Each group gets their own .claude/ to prevent cross-group session access
+  // グループごとの Claude セッションディレクトリ（他のグループから隔離）
+  // グループ間のセッションアクセスを防ぐため、各グループは独自の .claude/ を持ちます
   const groupSessionsDir = path.join(
     DATA_DIR,
     'sessions',
@@ -129,13 +130,13 @@ function buildVolumeMounts(
       JSON.stringify(
         {
           env: {
-            // Enable agent swarms (subagent orchestration)
+            // エージェントスウォーム（サブエージェントのオーケストレーション）を有効にする
             // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
             CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-            // Load CLAUDE.md from additional mounted directories
+            // 追加マウントされたディレクトリから CLAUDE.md を読み込む
             // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
             CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-            // Enable Claude's memory feature (persists user preferences between sessions)
+            // Claude のメモリ機能を有効にする（セッション間でユーザー設定を永続化）
             // https://code.claude.com/docs/en/memory#manage-auto-memory
             CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
           },
@@ -146,7 +147,7 @@ function buildVolumeMounts(
     );
   }
 
-  // Sync skills from container/skills/ into each group's .claude/skills/
+  // container/skills/ から各グループ의 .claude/skills/ にスキルを同期
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');
   const skillsDst = path.join(groupSessionsDir, 'skills');
   if (fs.existsSync(skillsSrc)) {
@@ -163,8 +164,8 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Per-group IPC namespace: each group gets its own IPC directory
-  // This prevents cross-group privilege escalation via IPC
+  // グループごとの IPC ネームスペース: 各グループは独自の IPC ディレクトリを持ちます
+  // これにより、IPC を介したグループを跨ぐ権限昇格を防ぎます
   const groupIpcDir = resolveGroupIpcPath(group.folder);
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
@@ -175,9 +176,9 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Copy agent-runner source into a per-group writable location so agents
-  // can customize it (add tools, change behavior) without affecting other
-  // groups. Recompiled on container startup via entrypoint.sh.
+  // agent-runner のソースをグループごとの書き込み可能な場所にコピーし、
+  // エージェントが他のグループに影響を与えずにカスタマイズ（ツールの追加、
+  // 動作の変更）できるようにします。コンテナ起動時に entrypoint.sh を介して再コンパイルされます。
   const agentRunnerSrc = path.join(
     projectRoot,
     'container',
@@ -199,7 +200,7 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Additional mounts validated against external allowlist (tamper-proof from containers)
+  // 外部許可リスト（コンテナから改ざん不能）に対して検証された追加マウント
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
       group.containerConfig.additionalMounts,
@@ -218,19 +219,19 @@ function buildContainerArgs(
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
-  // Pass host timezone so container's local time matches the user's
+  // コンテナのローカル時間がユーザーと一致するようにホストのタイムゾーンを渡す
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // Route API traffic through the credential proxy (containers never see real secrets)
+  // API トラフィックを認証情報プロキシ経由でルーティング（コンテナは実際のシークレットを関知しない）
   args.push(
     '-e',
     `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
   );
 
-  // Mirror the host's auth method with a placeholder value.
-  // API key mode: SDK sends x-api-key, proxy replaces with real key.
-  // OAuth mode:   SDK exchanges placeholder token for temp API key,
-  //               proxy injects real OAuth token on that exchange request.
+  // ホストの認証方法をプレースホルダー値でミラーリング
+  // API キーモード: SDK は x-api-key を送信し、プロキシが本物のキーに置き換える
+  // OAuth モード:   SDK はプレースホルダー・トークンを一時的な API キーに交換し、
+  //               プロキシはその交換リクエストに実際の OAuth トークンを注入する
   const authMode = detectAuthMode();
   if (authMode === 'api-key') {
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
@@ -238,12 +239,12 @@ function buildContainerArgs(
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
   }
 
-  // Runtime-specific args for host gateway resolution
+  // ホストゲートウェイ解決のためのランタイム固有の引数
   args.push(...hostGatewayArgs());
 
-  // Run as host user so bind-mounted files are accessible.
-  // Skip when running as root (uid 0), as the container's node user (uid 1000),
-  // or when getuid is unavailable (native Windows without WSL).
+  // バインドマウントされたファイルにアクセスできるよう、ホストユーザーとして実行。
+  // root (uid 0)、コンテナの node ユーザー (uid 1000)、または
+  // getuid が利用できない場合（WSL ではないネイティブ Windows）はスキップ。
   const hostUid = process.getuid?.();
   const hostGid = process.getgid?.();
   if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
@@ -321,7 +322,7 @@ export async function runContainerAgent(
     container.stdin.write(JSON.stringify(input));
     container.stdin.end();
 
-    // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
+    // ストリーミング出力: 到着した OUTPUT_START/END マーカーのペアをパース
     let parseBuffer = '';
     let newSessionId: string | undefined;
     let outputChain = Promise.resolve();
@@ -329,7 +330,7 @@ export async function runContainerAgent(
     container.stdout.on('data', (data) => {
       const chunk = data.toString();
 
-      // Always accumulate for logging
+      // 常にログ用に蓄積
       if (!stdoutTruncated) {
         const remaining = CONTAINER_MAX_OUTPUT_SIZE - stdout.length;
         if (chunk.length > remaining) {
@@ -344,13 +345,13 @@ export async function runContainerAgent(
         }
       }
 
-      // Stream-parse for output markers
+      // 出力マーカーをストリームパース
       if (onOutput) {
         parseBuffer += chunk;
         let startIdx: number;
         while ((startIdx = parseBuffer.indexOf(OUTPUT_START_MARKER)) !== -1) {
           const endIdx = parseBuffer.indexOf(OUTPUT_END_MARKER, startIdx);
-          if (endIdx === -1) break; // Incomplete pair, wait for more data
+          if (endIdx === -1) break; // 不完全なペア。次のデータを待つ
 
           const jsonStr = parseBuffer
             .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
@@ -363,10 +364,10 @@ export async function runContainerAgent(
               newSessionId = parsed.newSessionId;
             }
             hadStreamingOutput = true;
-            // Activity detected — reset the hard timeout
+            // アクティビティを検出 — ハードタイムアウトをリセット
             resetTimeout();
-            // Call onOutput for all markers (including null results)
-            // so idle timers start even for "silent" query completions.
+            // 「サイレント」なクエリ完了でもアイドルタイマーが開始されるよう、
+            // すべてのマーカー（null 結果を含む）に対して onOutput を呼び出す。
             outputChain = outputChain.then(() => onOutput(parsed));
           } catch (err) {
             logger.warn(
@@ -384,8 +385,8 @@ export async function runContainerAgent(
       for (const line of lines) {
         if (line) logger.debug({ container: group.folder }, line);
       }
-      // Don't reset timeout on stderr — SDK writes debug logs continuously.
-      // Timeout only resets on actual output (OUTPUT_MARKER in stdout).
+      // stderr ではタイムアウトをリセットしない — SDK はデバッグログを常に出力するため。
+      // タイムアウトは、実際の出力（stdout 内の OUTPUT_MARKER）に対してのみリセットされる。
       if (stderrTruncated) return;
       const remaining = CONTAINER_MAX_OUTPUT_SIZE - stderr.length;
       if (chunk.length > remaining) {
@@ -403,8 +404,8 @@ export async function runContainerAgent(
     let timedOut = false;
     let hadStreamingOutput = false;
     const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
-    // Grace period: hard timeout must be at least IDLE_TIMEOUT + 30s so the
-    // graceful _close sentinel has time to trigger before the hard kill fires.
+    // 猶予期間: ハード kill が発動する前に、グレースフルな _close センチネルが発動する
+    // 時間を確保するため、ハードタイムアウトは少なくとも IDLE_TIMEOUT + 30秒である必要があります。
     const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
 
     const killOnTimeout = () => {
@@ -426,7 +427,7 @@ export async function runContainerAgent(
 
     let timeout = setTimeout(killOnTimeout, timeoutMs);
 
-    // Reset the timeout whenever there's activity (streaming output)
+    // アクティビティ（ストリーミング出力）があるたびにタイムアウトをリセット
     const resetTimeout = () => {
       clearTimeout(timeout);
       timeout = setTimeout(killOnTimeout, timeoutMs);
@@ -452,9 +453,9 @@ export async function runContainerAgent(
           ].join('\n'),
         );
 
-        // Timeout after output = idle cleanup, not failure.
-        // The agent already sent its response; this is just the
-        // container being reaped after the idle period expired.
+        // 出力後のタイムアウト = 失敗ではなく、アイドルのクリーンアップ。
+        // エージェントはすでに応答を送信済み。これはアイドル期間が経過した後に
+        // コンテナが回収されただけである。
         if (hadStreamingOutput) {
           logger.info(
             { group: group.name, containerName, duration, code },
@@ -562,7 +563,7 @@ export async function runContainerAgent(
         return;
       }
 
-      // Streaming mode: wait for output chain to settle, return completion marker
+      // ストリーミングモード: 出力チェーンが落ち着くのを待ち、完了マーカーを返す
       if (onOutput) {
         outputChain.then(() => {
           logger.info(
@@ -578,9 +579,9 @@ export async function runContainerAgent(
         return;
       }
 
-      // Legacy mode: parse the last output marker pair from accumulated stdout
+      // レガシーモード: 蓄積された stdout から最後の出力マーカーペアをパース
       try {
-        // Extract JSON between sentinel markers for robust parsing
+        // 堅牢なパースのため、センチネルマーカー間の JSON を抽出
         const startIdx = stdout.indexOf(OUTPUT_START_MARKER);
         const endIdx = stdout.indexOf(OUTPUT_END_MARKER);
 
@@ -590,7 +591,7 @@ export async function runContainerAgent(
             .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
             .trim();
         } else {
-          // Fallback: last non-empty line (backwards compatibility)
+          // フォールバック: 最後の空でない行（後方互換性）
           const lines = stdout.trim().split('\n');
           jsonLine = lines[lines.length - 1];
         }
@@ -655,11 +656,11 @@ export function writeTasksSnapshot(
     next_run: string | null;
   }>,
 ): void {
-  // Write filtered tasks to the group's IPC directory
+  // フィルタリングされたタスクをグループの IPC ディレクトリに書き込む
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
-  // Main sees all tasks, others only see their own
+  // メイングループはすべてのタスクを表示でき、他は自身のタスクのみを表示できる
   const filteredTasks = isMain
     ? tasks
     : tasks.filter((t) => t.groupFolder === groupFolder);
@@ -676,9 +677,9 @@ export interface AvailableGroup {
 }
 
 /**
- * Write available groups snapshot for the container to read.
- * Only main group can see all available groups (for activation).
- * Non-main groups only see their own registration status.
+ * コンテナが読み取るための利用可能なグループのスナップショットを書き込みます。
+ * メイングループのみが、すべての利用可能なグループを表示できます（アクティブ化のため）。
+ * メイン以外のグループは、自身の登録ステータスのみを表示できます。
  */
 export function writeGroupsSnapshot(
   groupFolder: string,
@@ -689,7 +690,7 @@ export function writeGroupsSnapshot(
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
-  // Main sees all groups; others see nothing (they can't activate groups)
+  // メイングループはすべてのグループを表示でき、他は何も表示できない（グループをアクティブ化できないため）
   const visibleGroups = isMain ? groups : [];
 
   const groupsFile = path.join(groupIpcDir, 'available_groups.json');
