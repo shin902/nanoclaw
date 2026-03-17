@@ -1,6 +1,6 @@
 /**
- * Step: mounts — Write mount allowlist config file.
- * Replaces 07-configure-mounts.sh
+ * ステップ: mounts — マウント許可リストの設定ファイルを書き込みます。
+ * 07-configure-mounts.sh を置き換えるものです。
  */
 import fs from 'fs';
 import path from 'path';
@@ -31,17 +31,17 @@ export async function run(args: string[]): Promise<void> {
 
   if (isRoot()) {
     logger.warn(
-      'Running as root — mount allowlist will be written to root home directory',
+      'root として実行中 — マウント許可リストは root のホームディレクトリに書き込まれます',
     );
   }
 
   fs.mkdirSync(configDir, { recursive: true });
 
-  let allowedRoots = 0;
+  let allowedRootsCount = 0;
   let nonMainReadOnly = 'true';
 
   if (empty) {
-    logger.info('Writing empty mount allowlist');
+    logger.info('空のマウント許可リストを書き込み中');
     const emptyConfig = {
       allowedRoots: [],
       blockedPatterns: [],
@@ -49,12 +49,12 @@ export async function run(args: string[]): Promise<void> {
     };
     fs.writeFileSync(configFile, JSON.stringify(emptyConfig, null, 2) + '\n');
   } else if (json) {
-    // Validate JSON with JSON.parse (not piped through shell)
+    // JSON.parse で JSON を検証（シェルを介さない）
     let parsed: { allowedRoots?: unknown[]; nonMainReadOnly?: boolean };
     try {
       parsed = JSON.parse(json);
     } catch {
-      logger.error('Invalid JSON input');
+      logger.error('無効な JSON 入力です');
       emitStatus('CONFIGURE_MOUNTS', {
         PATH: configFile,
         ALLOWED_ROOTS: 0,
@@ -64,23 +64,23 @@ export async function run(args: string[]): Promise<void> {
         LOG: 'logs/setup.log',
       });
       process.exit(4);
-      return; // unreachable but satisfies TS
+      return; // TS を満たすための unreachable
     }
 
     fs.writeFileSync(configFile, JSON.stringify(parsed, null, 2) + '\n');
-    allowedRoots = Array.isArray(parsed.allowedRoots)
+    allowedRootsCount = Array.isArray(parsed.allowedRoots)
       ? parsed.allowedRoots.length
       : 0;
     nonMainReadOnly = parsed.nonMainReadOnly === false ? 'false' : 'true';
   } else {
-    // Read from stdin
-    logger.info('Reading mount allowlist from stdin');
+    // 標準入力から読み込み
+    logger.info('標準入力からマウント許可リストを読み込み中');
     const input = fs.readFileSync(0, 'utf-8');
     let parsed: { allowedRoots?: unknown[]; nonMainReadOnly?: boolean };
     try {
       parsed = JSON.parse(input);
     } catch {
-      logger.error('Invalid JSON from stdin');
+      logger.error('標準入力からの JSON が無効です');
       emitStatus('CONFIGURE_MOUNTS', {
         PATH: configFile,
         ALLOWED_ROOTS: 0,
@@ -94,20 +94,20 @@ export async function run(args: string[]): Promise<void> {
     }
 
     fs.writeFileSync(configFile, JSON.stringify(parsed, null, 2) + '\n');
-    allowedRoots = Array.isArray(parsed.allowedRoots)
+    allowedRootsCount = Array.isArray(parsed.allowedRoots)
       ? parsed.allowedRoots.length
       : 0;
     nonMainReadOnly = parsed.nonMainReadOnly === false ? 'false' : 'true';
   }
 
   logger.info(
-    { configFile, allowedRoots, nonMainReadOnly },
-    'Allowlist configured',
+    { configFile, allowedRootsCount, nonMainReadOnly },
+    '許可リストを設定しました',
   );
 
   emitStatus('CONFIGURE_MOUNTS', {
     PATH: configFile,
-    ALLOWED_ROOTS: allowedRoots,
+    ALLOWED_ROOTS: allowedRootsCount,
     NON_MAIN_READ_ONLY: nonMainReadOnly,
     STATUS: 'success',
     LOG: 'logs/setup.log',
