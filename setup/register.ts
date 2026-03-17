@@ -1,17 +1,17 @@
 /**
- * Step: register — Write channel registration config, create group folders.
+ * ステップ: register — チャネル登録設定を書き込み、グループフォルダを作成します。
  *
- * Accepts --channel to specify the messaging platform (whatsapp, telegram, slack, discord).
- * Uses parameterized SQL queries to prevent injection.
+ * --channel を受け取り、メッセージングプラットフォーム (whatsapp, telegram, slack, discord) を指定します。
+ * インジェクションを防ぐため、パラメータ化された SQL クエリを使用します。
  */
 import fs from 'fs';
 import path from 'path';
 
-import { STORE_DIR } from '../src/config.ts';
-import { initDatabase, setRegisteredGroup } from '../src/db.ts';
-import { isValidGroupFolder } from '../src/group-folder.ts';
-import { logger } from '../src/logger.ts';
-import { emitStatus } from './status.ts';
+import { STORE_DIR } from '../src/config.js';
+import { initDatabase, setRegisteredGroup } from '../src/db.js';
+import { isValidGroupFolder } from '../src/group-folder.js';
+import { logger } from '../src/logger.js';
+import { emitStatus } from './status.js';
 
 interface RegisterArgs {
   jid: string;
@@ -30,7 +30,7 @@ function parseArgs(args: string[]): RegisterArgs {
     name: '',
     trigger: '',
     folder: '',
-    channel: 'whatsapp', // backward-compat: pre-refactor installs omit --channel
+    channel: 'whatsapp', // 後方互換性: リファクタリング前のインストールでは --channel が省略されます
     requiresTrigger: true,
     isMain: false,
     assistantName: 'Andy',
@@ -90,14 +90,14 @@ export async function run(args: string[]): Promise<void> {
     process.exit(4);
   }
 
-  logger.info(parsed, 'Registering channel');
+  logger.info(parsed, 'チャネルを登録中');
 
-  // Ensure data and store directories exist (store/ may not exist on
-  // fresh installs that skip WhatsApp auth, which normally creates it)
+  // data および store ディレクトリが存在することを確認（store/ は WhatsApp 認証をスキップした
+  // 新規インストール時には存在しない可能性があります。通常は認証時に作成されます）
   fs.mkdirSync(path.join(projectRoot, 'data'), { recursive: true });
   fs.mkdirSync(STORE_DIR, { recursive: true });
 
-  // Initialize database (creates schema + runs migrations)
+  // データベースを初期化（スキーマ作成 + マイグレーション実行）
   initDatabase();
 
   setRegisteredGroup(parsed.jid, {
@@ -109,19 +109,19 @@ export async function run(args: string[]): Promise<void> {
     isMain: parsed.isMain,
   });
 
-  logger.info('Wrote registration to SQLite');
+  logger.info('SQLite に登録情報を書き込みました');
 
-  // Create group folders
+  // グループフォルダを作成
   fs.mkdirSync(path.join(projectRoot, 'groups', parsed.folder, 'logs'), {
     recursive: true,
   });
 
-  // Update assistant name in CLAUDE.md files if different from default
+  // デフォルトと異なる場合、CLAUDE.md ファイル内のアシスタント名を更新
   let nameUpdated = false;
   if (parsed.assistantName !== 'Andy') {
     logger.info(
       { from: 'Andy', to: parsed.assistantName },
-      'Updating assistant name',
+      'アシスタント名を更新中',
     );
 
     const mdFiles = [
@@ -138,11 +138,11 @@ export async function run(args: string[]): Promise<void> {
           `You are ${parsed.assistantName}`,
         );
         fs.writeFileSync(mdFile, content);
-        logger.info({ file: mdFile }, 'Updated CLAUDE.md');
+        logger.info({ file: mdFile }, 'CLAUDE.md を更新しました');
       }
     }
 
-    // Update .env
+    // .env を更新
     const envFile = path.join(projectRoot, '.env');
     if (fs.existsSync(envFile)) {
       let envContent = fs.readFileSync(envFile, 'utf-8');
@@ -158,7 +158,7 @@ export async function run(args: string[]): Promise<void> {
     } else {
       fs.writeFileSync(envFile, `ASSISTANT_NAME="${parsed.assistantName}"\n`);
     }
-    logger.info('Set ASSISTANT_NAME in .env');
+    logger.info('.env に ASSISTANT_NAME を設定しました');
     nameUpdated = true;
   }
 
