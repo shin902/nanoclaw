@@ -52,17 +52,17 @@
 │  ┌──────────────────────────────────────────────────────────────┐     │
 │  │                    エージェントランナー                          │     │
 │  │                                                              │     │
-│  │  作業ディレクトリ: /workspace/group (ホストからマウント)            │    │
+│  │  作業ディレクトリ: /workspace/group (ホストからマウント)           │     │
 │  │  ボリュームマウント:                                            │     │
 │  │    • groups/{name}/ → /workspace/group                       │     │
 │  │    • groups/global/ → /workspace/global/ (メイン以外のみ)      │     │
 │  │    • data/sessions/{group}/.claude/ → /home/node/.claude/    │     │
 │  │    • 追加ディレクトリ → /workspace/extra/*                      │     │
 │  │                                                              │     │
-│  │  ツール (全グループ共通):                                       │      │
+│  │  ツール (全グループ共通):                                        │     │
 │  │    • Bash (安全 - コンテナ内でサンドボックス化!)                  │      │
 │  │    • Read, Write, Edit, Glob, Grep (ファイル操作)              │     │
-│  │    • WebSearch, WebFetch (インターネットアクセス)               │      │
+│  │    • WebSearch, WebFetch (インターネットアクセス)                │     │
 │  │    • agent-browser (ブラウザ自動化)                            │     │
 │  │    • mcp__nanoclaw__* (IPC 経由のスケジューラツール)             │     │
 │  │                                                              │     │
