@@ -3,9 +3,10 @@ import path from 'path';
 
 import { readEnvFile } from './env.js';
 
-// Read config values from .env (falls back to process.env).
-// Secrets (API keys, tokens) are NOT read here — they are loaded only
-// by the credential proxy (credential-proxy.ts), never exposed to containers.
+// .env から設定値を読み込みます（process.env にフォールバックします）。
+// シークレット（API キー、トークン）はここでは読み込み「ません」。
+// それらは認証情報プロキシ（credential-proxy.ts）によってのみロードされ、
+// コンテナにさらされることはありません。
 const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER']);
 
 export const ASSISTANT_NAME =
@@ -16,11 +17,11 @@ export const ASSISTANT_HAS_OWN_NUMBER =
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
-// Absolute paths needed for container mounts
+// コンテナマウントに必要な絶対パス
 const PROJECT_ROOT = process.cwd();
 const HOME_DIR = process.env.HOME || os.homedir();
 
-// Mount security: allowlist stored OUTSIDE project root, never mounted into containers
+// マウントセキュリティ: プロジェクトルートの「外」に保存され、コンテナには決してマウントされない許可リスト
 export const MOUNT_ALLOWLIST_PATH = path.join(
   HOME_DIR,
   '.config',
@@ -46,13 +47,13 @@ export const CONTAINER_TIMEOUT = parseInt(
 export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
   process.env.CONTAINER_MAX_OUTPUT_SIZE || '10485760',
   10,
-); // 10MB default
+); // デフォルト 10MB
 export const CREDENTIAL_PROXY_PORT = parseInt(
   process.env.CREDENTIAL_PROXY_PORT || '3001',
   10,
 );
 export const IPC_POLL_INTERVAL = 1000;
-export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep container alive after last result
+export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // デフォルト 30分 — 最後に出力があってからコンテナを維持する時間
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
@@ -67,7 +68,7 @@ export const TRIGGER_PATTERN = new RegExp(
   'i',
 );
 
-// Timezone for scheduled tasks (cron expressions, etc.)
-// Uses system timezone by default
+// 定期実行タスク（cron 式など）用のタイムゾーン
+// デフォルトでシステムタイムゾーンを使用します
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
