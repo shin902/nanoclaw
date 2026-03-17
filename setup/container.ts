@@ -1,6 +1,6 @@
 /**
- * Step: container — Build container image and verify with test run.
- * Replaces 03-setup-container.sh
+ * ステップ: container — コンテナイメージをビルドし、テスト実行で検証します。
+ * 03-setup-container.sh を置き換えるものです。
  */
 import { execSync } from 'child_process';
 import path from 'path';
@@ -39,7 +39,7 @@ export async function run(args: string[]): Promise<void> {
     process.exit(4);
   }
 
-  // Validate runtime availability
+  // ランタイムが利用可能か検証
   if (runtime === 'apple-container' && !commandExists('container')) {
     emitStatus('SETUP_CONTAINER', {
       RUNTIME: runtime,
@@ -99,33 +99,33 @@ export async function run(args: string[]): Promise<void> {
     runtime === 'apple-container' ? 'container build' : 'docker build';
   const runCmd = runtime === 'apple-container' ? 'container' : 'docker';
 
-  // Build
+  // ビルド
   let buildOk = false;
-  logger.info({ runtime }, 'Building container');
+  logger.info({ runtime }, 'コンテナをビルド中');
   try {
     execSync(`${buildCmd} -t ${image} .`, {
       cwd: path.join(projectRoot, 'container'),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     buildOk = true;
-    logger.info('Container build succeeded');
+    logger.info('コンテナのビルド成功');
   } catch (err) {
-    logger.error({ err }, 'Container build failed');
+    logger.error({ err }, 'コンテナのビルド失敗');
   }
 
-  // Test
+  // テスト
   let testOk = false;
   if (buildOk) {
-    logger.info('Testing container');
+    logger.info('コンテナをテスト中');
     try {
       const output = execSync(
         `echo '{}' | ${runCmd} run -i --rm --entrypoint /bin/echo ${image} "Container OK"`,
         { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
       );
       testOk = output.includes('Container OK');
-      logger.info({ testOk }, 'Container test result');
+      logger.info({ testOk }, 'コンテナのテスト結果');
     } catch {
-      logger.error('Container test failed');
+      logger.error('コンテナのテスト失敗');
     }
   }
 
