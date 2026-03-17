@@ -1,140 +1,140 @@
-# NanoClaw Specification
+# NanoClaw 仕様書
 
-A personal Claude assistant with multi-channel support, persistent memory per conversation, scheduled tasks, and container-isolated agent execution.
-
----
-
-## Table of Contents
-
-1. [Architecture](#architecture)
-2. [Architecture: Channel System](#architecture-channel-system)
-3. [Folder Structure](#folder-structure)
-4. [Configuration](#configuration)
-5. [Memory System](#memory-system)
-6. [Session Management](#session-management)
-7. [Message Flow](#message-flow)
-8. [Commands](#commands)
-9. [Scheduled Tasks](#scheduled-tasks)
-10. [MCP Servers](#mcp-servers)
-11. [Deployment](#deployment)
-12. [Security Considerations](#security-considerations)
+マルチチャネル対応、会話ごとの永続メモリ、定期実行タスク、およびコンテナで隔離されたエージェント実行を備えた、個人用の Claude アシスタント。
 
 ---
 
-## Architecture
+## 目次
+
+1. [アーキテクチャ](#architecture)
+2. [アーキテクチャ: チャネルシステム](#architecture-channel-system)
+3. [フォルダ構造](#folder-structure)
+4. [設定](#configuration)
+5. [メモリシステム](#memory-system)
+6. [セッション管理](#session-management)
+7. [メッセージフロー](#message-flow)
+8. [コマンド](#commands)
+9. [定期実行タスク](#scheduled-tasks)
+10. [MCP サーバー](#mcp-servers)
+11. [デプロイ](#deployment)
+12. [セキュリティ上の考慮事項](#security-considerations)
+
+---
+
+## アーキテクチャ
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│                        HOST (macOS / Linux)                           │
-│                     (Main Node.js Process)                            │
+│                        ホスト (macOS / Linux)                         │
+│                     (メイン Node.js プロセス)                          │
 ├──────────────────────────────────────────────────────────────────────┤
-│                                                                       │
+│                                                                      │
 │  ┌──────────────────┐                  ┌────────────────────┐        │
-│  │ Channels         │─────────────────▶│   SQLite Database  │        │
-│  │ (self-register   │◀────────────────│   (messages.db)    │        │
-│  │  at startup)     │  store/send      └─────────┬──────────┘        │
-│  └──────────────────┘                            │                   │
+│  │ チャネル         │─────────────────▶│   SQLite データベース │         │
+│  │ (起動時に自己登録) │◀────────────────│   (messages.db)    │          │
+│  └──────────────────┘  保存/送信        └─────────┬──────────┘         │
+│                                                   │                   │
 │                                                   │                   │
 │         ┌─────────────────────────────────────────┘                   │
 │         │                                                             │
 │         ▼                                                             │
-│  ┌──────────────────┐    ┌──────────────────┐    ┌───────────────┐   │
-│  │  Message Loop    │    │  Scheduler Loop  │    │  IPC Watcher  │   │
-│  │  (polls SQLite)  │    │  (checks tasks)  │    │  (file-based) │   │
+│  ┌──────────────────┐    ┌──────────────────┐    ┌───────────────┐    │
+│  │ メッセージループ  │    │ スケジューラループ │    │  IPC ウォッチャー │      │
+│  │ (SQLite をポーリング)│    │ (タスクを確認)    │    │ (ファイルベース)  │   │
 │  └────────┬─────────┘    └────────┬─────────┘    └───────────────┘   │
 │           │                       │                                   │
 │           └───────────┬───────────┘                                   │
-│                       │ spawns container                              │
+│                       │ コンテナを起動                                │
 │                       ▼                                               │
 ├──────────────────────────────────────────────────────────────────────┤
-│                     CONTAINER (Linux VM)                               │
+│                     コンテナ (Linux VM)                               │
 ├──────────────────────────────────────────────────────────────────────┤
 │  ┌──────────────────────────────────────────────────────────────┐    │
-│  │                    AGENT RUNNER                               │    │
+│  │                    エージェントランナー                            │    │
 │  │                                                                │    │
-│  │  Working directory: /workspace/group (mounted from host)       │    │
-│  │  Volume mounts:                                                │    │
+│  │  作業ディレクトリ: /workspace/group (ホストからマウント)          │    │
+│  │  ボリュームマウント:                                             │    │
 │  │    • groups/{name}/ → /workspace/group                         │    │
-│  │    • groups/global/ → /workspace/global/ (non-main only)       │    │
+│  │    • groups/global/ → /workspace/global/ (メイン以外のみ)       │    │
 │  │    • data/sessions/{group}/.claude/ → /home/node/.claude/      │    │
-│  │    • Additional dirs → /workspace/extra/*                      │    │
+│  │    • 追加ディレクトリ → /workspace/extra/*                       │    │
 │  │                                                                │    │
-│  │  Tools (all groups):                                           │    │
-│  │    • Bash (safe - sandboxed in container!)                     │    │
-│  │    • Read, Write, Edit, Glob, Grep (file operations)           │    │
-│  │    • WebSearch, WebFetch (internet access)                     │    │
-│  │    • agent-browser (browser automation)                        │    │
-│  │    • mcp__nanoclaw__* (scheduler tools via IPC)                │    │
+│  │  ツール (全グループ共通):                                         │    │
+│  │    • Bash (安全 - コンテナ内でサンドボックス化!)                  │    │
+│  │    • Read, Write, Edit, Glob, Grep (ファイル操作)               │    │
+│  │    • WebSearch, WebFetch (インターネットアクセス)                │    │
+│  │    • agent-browser (ブラウザ自動化)                             │    │
+│  │    • mcp__nanoclaw__* (IPC 経由のスケジューラツール)              │    │
 │  │                                                                │    │
 │  └──────────────────────────────────────────────────────────────┘    │
 │                                                                       │
 └───────────────────────────────────────────────────────────────────────┘
 ```
 
-### Technology Stack
+### テクノロジースタック
 
-| Component | Technology | Purpose |
+| コンポーネント | テクノロジー | 目的 |
 |-----------|------------|---------|
-| Channel System | Channel registry (`src/channels/registry.ts`) | Channels self-register at startup |
-| Message Storage | SQLite (better-sqlite3) | Store messages for polling |
-| Container Runtime | Containers (Linux VMs) | Isolated environments for agent execution |
-| Agent | @anthropic-ai/claude-agent-sdk (0.2.29) | Run Claude with tools and MCP servers |
-| Browser Automation | agent-browser + Chromium | Web interaction and screenshots |
-| Runtime | Node.js 20+ | Host process for routing and scheduling |
+| チャネルシステム | チャネルレジストリ (`src/channels/registry.ts`) | 起動時に各チャネルが自己登録を行う |
+| メッセージ保存 | SQLite (better-sqlite3) | ポーリング用にメッセージを保存する |
+| コンテナランタイム | コンテナ (Linux VM) | エージェント実行のための隔離された環境 |
+| エージェント | @anthropic-ai/claude-agent-sdk (0.2.29) | ツールや MCP サーバーを備えた Claude を実行する |
+| ブラウザ自動化 | agent-browser + Chromium | ウェブ操作とスクリーンショット取得 |
+| ランタイム | Node.js 20+ | ルーティングとスケジューリングのためのホストプロセス |
 
 ---
 
-## Architecture: Channel System
+## アーキテクチャ: チャネルシステム
 
-The core ships with no channels built in — each channel (WhatsApp, Telegram, Slack, Discord, Gmail) is installed as a [Claude Code skill](https://code.claude.com/docs/en/skills) that adds the channel code to your fork. Channels self-register at startup; installed channels with missing credentials emit a WARN log and are skipped.
+コアにはチャネルが組み込まれていません。各チャネル（WhatsApp, Telegram, Slack, Discord, Gmail）は [Claude Code スキル](https://code.claude.com/docs/en/skills) としてインストールされ、フォークにチャネルコードを追加します。チャネルは起動時に自己登録されます。インストール済みで認証情報が不足しているチャネルは、WARN ログを出力してスキップされます。
 
-### System Diagram
+### システム図
 
 ```mermaid
 graph LR
-    subgraph Channels["Channels"]
+    subgraph Channels["チャネル"]
         WA[WhatsApp]
         TG[Telegram]
         SL[Slack]
         DC[Discord]
-        New["Other Channel (Signal, Gmail...)"]
+        New["その他のチャネル (Signal, Gmail...)"]
     end
 
-    subgraph Orchestrator["Orchestrator — index.ts"]
-        ML[Message Loop]
-        GQ[Group Queue]
-        RT[Router]
-        TS[Task Scheduler]
+    subgraph Orchestrator["オーケストレーター — index.ts"]
+        ML[メッセージループ]
+        GQ[グループキュー]
+        RT[ルーター]
+        TS[タスクスケジューラ]
         DB[(SQLite)]
     end
 
-    subgraph Execution["Container Execution"]
-        CR[Container Runner]
-        LC["Linux Container"]
-        IPC[IPC Watcher]
+    subgraph Execution["コンテナ実行"]
+        CR[コンテナランナー]
+        LC["Linux コンテナ"]
+        IPC[IPC ウォッチャー]
     end
 
-    %% Flow
+    %% フロー
     WA & TG & SL & DC & New -->|onMessage| ML
     ML --> GQ
-    GQ -->|concurrency| CR
+    GQ -->|並列実行制御| CR
     CR --> LC
-    LC -->|filesystem IPC| IPC
-    IPC -->|tasks & messages| RT
+    LC -->|ファイルシステム IPC| IPC
+    IPC -->|タスクとメッセージ| RT
     RT -->|Channel.sendMessage| Channels
-    TS -->|due tasks| CR
+    TS -->|実行期限のタスク| CR
 
-    %% DB Connections
+    %% DB 接続
     DB <--> ML
     DB <--> TS
 
-    %% Styling for the dynamic channel
+    %% 動的チャネルのスタイリング
     style New stroke-dasharray: 5 5,stroke-width:2px
 ```
 
-### Channel Registry
+### チャネルレジストリ
 
-The channel system is built on a factory registry in `src/channels/registry.ts`:
+チャネルシステムは、`src/channels/registry.ts` にあるファクトリレジストリに基づいています：
 
 ```typescript
 export type ChannelFactory = (opts: ChannelOpts) => Channel | null;
@@ -154,11 +154,11 @@ export function getRegisteredChannelNames(): string[] {
 }
 ```
 
-Each factory receives `ChannelOpts` (callbacks for `onMessage`, `onChatMetadata`, and `registeredGroups`) and returns either a `Channel` instance or `null` if that channel's credentials are not configured.
+各ファクトリは `ChannelOpts`（`onMessage`, `onChatMetadata`, `registeredGroups` のためのコールバック）を受け取り、`Channel` インスタンス、または認証情報が設定されていない場合は `null` を返します。
 
-### Channel Interface
+### チャネルインターフェース
 
-Every channel implements this interface (defined in `src/types.ts`):
+すべてのチャネルは、以下のインターフェース（`src/types.ts` で定義）を実装します：
 
 ```typescript
 interface Channel {
@@ -173,11 +173,11 @@ interface Channel {
 }
 ```
 
-### Self-Registration Pattern
+### 自己登録パターン
 
-Channels self-register using a barrel-import pattern:
+チャネルはバレルインポート・パターンを使用して自己登録します：
 
-1. Each channel skill adds a file to `src/channels/` (e.g. `whatsapp.ts`, `telegram.ts`) that calls `registerChannel()` at module load time:
+1. 各チャネルスキルは `src/channels/` にファイル（例： `whatsapp.ts`, `telegram.ts`）を追加し、モジュールのロード時に `registerChannel()` を呼び出します：
 
    ```typescript
    // src/channels/whatsapp.ts
@@ -186,21 +186,21 @@ Channels self-register using a barrel-import pattern:
    export class WhatsAppChannel implements Channel { /* ... */ }
 
    registerChannel('whatsapp', (opts: ChannelOpts) => {
-     // Return null if credentials are missing
+     // 認証情報がない場合は null を返す
      if (!existsSync(authPath)) return null;
      return new WhatsAppChannel(opts);
    });
    ```
 
-2. The barrel file `src/channels/index.ts` imports all channel modules, triggering registration:
+2. バレルファイル `src/channels/index.ts` がすべてのチャネルモジュールをインポートし、登録をトリガーします：
 
    ```typescript
    import './whatsapp.js';
    import './telegram.js';
-   // ... each skill adds its import here
+   // ... 各スキルがここにインポートを追加
    ```
 
-3. At startup, the orchestrator (`src/index.ts`) loops through registered channels and connects whichever ones return a valid instance:
+3. 起動時に、オーケストレーター (`src/index.ts`) が登録済みチャネルをループし、有効なインスタンスを返すものを接続します：
 
    ```typescript
    for (const name of getRegisteredChannelNames()) {
@@ -213,120 +213,120 @@ Channels self-register using a barrel-import pattern:
    }
    ```
 
-### Key Files
+### 主要ファイル
 
-| File | Purpose |
+| ファイル | 目的 |
 |------|---------|
-| `src/channels/registry.ts` | Channel factory registry |
-| `src/channels/index.ts` | Barrel imports that trigger channel self-registration |
-| `src/types.ts` | `Channel` interface, `ChannelOpts`, message types |
-| `src/index.ts` | Orchestrator — instantiates channels, runs message loop |
-| `src/router.ts` | Finds the owning channel for a JID, formats messages |
+| `src/channels/registry.ts` | チャネルファクトリレジストリ |
+| `src/channels/index.ts` | チャネルの自己登録をトリガーするバレルインポート |
+| `src/types.ts` | `Channel` インターフェース、`ChannelOpts`、メッセージ型 |
+| `src/index.ts` | オーケストレーター — チャネルのインスタンス化、メッセージループの実行 |
+| `src/router.ts` | JID に対応するチャネルの特定、メッセージのフォーマット |
 
-### Adding a New Channel
+### 新しいチャネルの追加
 
-To add a new channel, contribute a skill to `.claude/skills/add-<name>/` that:
+新しいチャネルを追加するには、`.claude/skills/add-<name>/` に以下のスキルを提供します：
 
-1. Adds a `src/channels/<name>.ts` file implementing the `Channel` interface
-2. Calls `registerChannel(name, factory)` at module load
-3. Returns `null` from the factory if credentials are missing
-4. Adds an import line to `src/channels/index.ts`
+1. `Channel` インターフェースを実装した `src/channels/<name>.ts` ファイルを追加する
+2. モジュールロード時に `registerChannel(name, factory)` を呼び出す
+3. 認証情報がない場合はファクトリから `null` を返す
+4. `src/channels/index.ts` にインポート行を追加する
 
-See existing skills (`/add-whatsapp`, `/add-telegram`, `/add-slack`, `/add-discord`, `/add-gmail`) for the pattern.
+既存のスキル (`/add-whatsapp`, `/add-telegram`, `/add-slack`, `/add-discord`, `/add-gmail`) のパターンを参考にしてください。
 
 ---
 
-## Folder Structure
+## フォルダ構造
 
 ```
 nanoclaw/
-├── CLAUDE.md                      # Project context for Claude Code
+├── CLAUDE.md                      # Claude Code 用のプロジェクトコンテキスト
 ├── docs/
-│   ├── SPEC.md                    # This specification document
-│   ├── REQUIREMENTS.md            # Architecture decisions
-│   └── SECURITY.md                # Security model
-├── README.md                      # User documentation
-├── package.json                   # Node.js dependencies
-├── tsconfig.json                  # TypeScript configuration
-├── .mcp.json                      # MCP server configuration (reference)
+│   ├── SPEC.md                    # この仕様書ドキュメント
+│   ├── REQUIREMENTS.md            # アーキテクチャ決定事項
+│   └── SECURITY.md                # セキュリティモデル
+├── README.md                      # ユーザー向けドキュメント
+├── package.json                   # Node.js 依存関係
+├── tsconfig.json                  # TypeScript 設定
+├── .mcp.json                      # MCP サーバー設定 (リファレンス)
 ├── .gitignore
 │
 ├── src/
-│   ├── index.ts                   # Orchestrator: state, message loop, agent invocation
+│   ├── index.ts                   # オーケストレーター: 状態、メッセージループ、エージェント呼び出し
 │   ├── channels/
-│   │   ├── registry.ts            # Channel factory registry
-│   │   └── index.ts               # Barrel imports for channel self-registration
-│   ├── ipc.ts                     # IPC watcher and task processing
-│   ├── router.ts                  # Message formatting and outbound routing
-│   ├── config.ts                  # Configuration constants
-│   ├── types.ts                   # TypeScript interfaces (includes Channel)
-│   ├── logger.ts                  # Pino logger setup
-│   ├── db.ts                      # SQLite database initialization and queries
-│   ├── group-queue.ts             # Per-group queue with global concurrency limit
-│   ├── mount-security.ts          # Mount allowlist validation for containers
-│   ├── whatsapp-auth.ts           # Standalone WhatsApp authentication
-│   ├── task-scheduler.ts          # Runs scheduled tasks when due
-│   └── container-runner.ts        # Spawns agents in containers
+│   │   ├── registry.ts            # チャネルファクトリレジストリ
+│   │   └── index.ts               # チャネル自己登録のためのバレルインポート
+│   ├── ipc.ts                     # IPC ウォッチャーとタスク処理
+│   ├── router.ts                  # メッセージフォーマットと送信ルーティング
+│   ├── config.ts                  # 設定定数
+│   ├── types.ts                   # TypeScript インターフェース (Channel を含む)
+│   ├── logger.ts                  # Pino ロガー設定
+│   ├── db.ts                      # SQLite データベースの初期化とクエリ
+│   ├── group-queue.ts             # グローバルな並列実行制限を持つグループごとのキュー
+│   ├── mount-security.ts          # コンテナのマウント許可リスト検証
+│   ├── whatsapp-auth.ts           # スタンドアロンの WhatsApp 認証
+│   ├── task-scheduler.ts          # 実行期限が来たタスクを実行する
+│   └── container-runner.ts        # コンテナ内でエージェントを起動する
 │
 ├── container/
-│   ├── Dockerfile                 # Container image (runs as 'node' user, includes Claude Code CLI)
-│   ├── build.sh                   # Build script for container image
-│   ├── agent-runner/              # Code that runs inside the container
+│   ├── Dockerfile                 # コンテナイメージ ('node' ユーザーで実行、Claude Code CLI を含む)
+│   ├── build.sh                   # コンテナイメージのビルドスクリプト
+│   ├── agent-runner/              # コンテナ内で実行されるコード
 │   │   ├── package.json
 │   │   ├── tsconfig.json
 │   │   └── src/
-│   │       ├── index.ts           # Entry point (query loop, IPC polling, session resume)
-│   │       └── ipc-mcp-stdio.ts   # Stdio-based MCP server for host communication
+│   │       ├── index.ts           # エントリポイント (クエリーループ、IPC ポーリング、セッション再開)
+│   │       └── ipc-mcp-stdio.ts   # ホスト通信用の stdio ベース MCP サーバー
 │   └── skills/
-│       └── agent-browser.md       # Browser automation skill
+│       └── agent-browser.md       # ブラウザ自動化スキル
 │
-├── dist/                          # Compiled JavaScript (gitignored)
+├── dist/                          # コンパイル済み JavaScript (gitignored)
 │
 ├── .claude/
 │   └── skills/
-│       ├── setup/SKILL.md              # /setup - First-time installation
-│       ├── customize/SKILL.md          # /customize - Add capabilities
-│       ├── debug/SKILL.md              # /debug - Container debugging
-│       ├── add-telegram/SKILL.md       # /add-telegram - Telegram channel
-│       ├── add-gmail/SKILL.md          # /add-gmail - Gmail integration
+│       ├── setup/SKILL.md              # /setup - 初回インストール
+│       ├── customize/SKILL.md          # /customize - 機能の追加
+│       ├── debug/SKILL.md              # /debug - コンテナのデバッグ
+│       ├── add-telegram/SKILL.md       # /add-telegram - Telegram チャネル
+│       ├── add-gmail/SKILL.md          # /add-gmail - Gmail 連携
 │       ├── add-voice-transcription/    # /add-voice-transcription - Whisper
 │       ├── x-integration/SKILL.md      # /x-integration - X/Twitter
-│       ├── convert-to-apple-container/  # /convert-to-apple-container - Apple Container runtime
-│       └── add-parallel/SKILL.md       # /add-parallel - Parallel agents
+│       ├── convert-to-apple-container/  # /convert-to-apple-container - Apple Container ランタイム
+│       └── add-parallel/SKILL.md       # /add-parallel - 並列エージェント
 │
 ├── groups/
-│   ├── CLAUDE.md                  # Global memory (all groups read this)
-│   ├── {channel}_main/             # Main control channel (e.g., whatsapp_main/)
-│   │   ├── CLAUDE.md              # Main channel memory
-│   │   └── logs/                  # Task execution logs
-│   └── {channel}_{group-name}/    # Per-group folders (created on registration)
-│       ├── CLAUDE.md              # Group-specific memory
-│       ├── logs/                  # Task logs for this group
-│       └── *.md                   # Files created by the agent
+│   ├── CLAUDE.md                  # グローバルメモリ (すべてのグループが読み込む)
+│   ├── {channel}_main/             # メインコントロールチャネル (例: whatsapp_main/)
+│   │   ├── CLAUDE.md              # メインチャネルのメモリ
+│   │   └── logs/                  # タスク実行ログ
+│   └── {channel}_{group-name}/    # グループごとのフォルダ (登録時に作成)
+│       ├── CLAUDE.md              # グループ固有のメモリ
+│       ├── logs/                  # このグループのタスクログ
+│       └── *.md                   # エージェントによって作成されたファイル
 │
-├── store/                         # Local data (gitignored)
-│   ├── auth/                      # WhatsApp authentication state
-│   └── messages.db                # SQLite database (messages, chats, scheduled_tasks, task_run_logs, registered_groups, sessions, router_state)
+├── store/                         # ローカルデータ (gitignored)
+│   ├── auth/                      # WhatsApp 認証ステート
+│   └── messages.db                # SQLite データベース (メッセージ、チャット、タスク、ログ、登録済みグループ、セッション、ルーターステート)
 │
-├── data/                          # Application state (gitignored)
-│   ├── sessions/                  # Per-group session data (.claude/ dirs with JSONL transcripts)
-│   ├── env/env                    # Copy of .env for container mounting
-│   └── ipc/                       # Container IPC (messages/, tasks/)
+├── data/                          # アプリケーションステート (gitignored)
+│   ├── sessions/                  # グループごとのセッションデータ (JSONL 形式の履歴を含む .claude/ ディレクトリ)
+│   ├── env/env                    # コンテナマウント用の .env のコピー
+│   └── ipc/                       # コンテナ IPC (messages/, tasks/)
 │
-├── logs/                          # Runtime logs (gitignored)
-│   ├── nanoclaw.log               # Host stdout
-│   └── nanoclaw.error.log         # Host stderr
-│   # Note: Per-container logs are in groups/{folder}/logs/container-*.log
+├── logs/                          # 実行ログ (gitignored)
+│   ├── nanoclaw.log               # ホストの標準出力
+│   └── nanoclaw.error.log         # ホストの標準エラー出力
+│   # 注: コンテナごとのログは groups/{folder}/logs/container-*.log に保存されます
 │
 └── launchd/
-    └── com.nanoclaw.plist         # macOS service configuration
+    └── com.nanoclaw.plist         # macOS サービス設定
 ```
 
 ---
 
-## Configuration
+## 設定
 
-Configuration constants are in `src/config.ts`:
+設定定数は `src/config.ts` にあります：
 
 ```typescript
 import path from 'path';
@@ -335,27 +335,27 @@ export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Andy';
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
-// Paths are absolute (required for container mounts)
+// パスは絶対パス（コンテナマウントに必要）
 const PROJECT_ROOT = process.cwd();
 export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
 export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 
-// Container configuration
+// コンテナ設定
 export const CONTAINER_IMAGE = process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
-export const CONTAINER_TIMEOUT = parseInt(process.env.CONTAINER_TIMEOUT || '1800000', 10); // 30min default
+export const CONTAINER_TIMEOUT = parseInt(process.env.CONTAINER_TIMEOUT || '1800000', 10); // デフォルト 30分
 export const IPC_POLL_INTERVAL = 1000;
-export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min — keep container alive after last result
+export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30分 — 最後に出力があってからコンテナを維持する時間
 export const MAX_CONCURRENT_CONTAINERS = Math.max(1, parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5);
 
 export const TRIGGER_PATTERN = new RegExp(`^@${ASSISTANT_NAME}\\b`, 'i');
 ```
 
-**Note:** Paths must be absolute for container volume mounts to work correctly.
+**注：** コンテナのボリュームマウントを正しく機能させるには、絶対パスを使用する必要があります。
 
-### Container Configuration
+### コンテナ設定
 
-Groups can have additional directories mounted via `containerConfig` in the SQLite `registered_groups` table (stored as JSON in the `container_config` column). Example registration:
+グループには、SQLite の `registered_groups` テーブルの `containerConfig`（`container_config` カラムに JSON として保存）を介して、追加のディレクトリをマウントできます。登録の例：
 
 ```typescript
 setRegisteredGroup("1234567890@g.us", {
@@ -376,283 +376,283 @@ setRegisteredGroup("1234567890@g.us", {
 });
 ```
 
-Folder names follow the convention `{channel}_{group-name}` (e.g., `whatsapp_family-chat`, `telegram_dev-team`). The main group has `isMain: true` set during registration.
+フォルダ名は `{channel}_{group-name}` の慣習に従います（例： `whatsapp_family-chat`, `telegram_dev-team`）。メイングループは登録時に `isMain: true` が設定されます。
 
-Additional mounts appear at `/workspace/extra/{containerPath}` inside the container.
+追加マウントは、コンテナ内の `/workspace/extra/{containerPath}` に表示されます。
 
-**Mount syntax note:** Read-write mounts use `-v host:container`, but readonly mounts require `--mount "type=bind,source=...,target=...,readonly"` (the `:ro` suffix may not work on all runtimes).
+**マウント構文の注意：** 読み書きマウントは `-v host:container` を使用しますが、読み取り専用マウントは `--mount "type=bind,source=...,target=...,readonly"` が必要です（`:ro` サフィックスはすべてのランタイムで動作するとは限りません）。
 
-### Claude Authentication
+### Claude 認証
 
-Configure authentication in a `.env` file in the project root. Two options:
+プロジェクトルートの `.env` ファイルで認証を設定します。2 つのオプションがあります：
 
-**Option 1: Claude Subscription (OAuth token)**
+**オプション 1: Claude サブスクリプション (OAuth トークン)**
 ```bash
 CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
 ```
-The token can be extracted from `~/.claude/.credentials.json` if you're logged in to Claude Code.
+トークンは、Claude Code にログインしている場合に `~/.claude/.credentials.json` から抽出できます。
 
-**Option 2: Pay-per-use API Key**
+**オプション 2: 従量課金 API キー**
 ```bash
 ANTHROPIC_API_KEY=sk-ant-api03-...
 ```
 
-Only the authentication variables (`CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY`) are extracted from `.env` and written to `data/env/env`, then mounted into the container at `/workspace/env-dir/env` and sourced by the entrypoint script. This ensures other environment variables in `.env` are not exposed to the agent. This workaround is needed because some container runtimes lose `-e` environment variables when using `-i` (interactive mode with piped stdin).
+認証変数（`CLAUDE_CODE_OAUTH_TOKEN` および `ANTHROPIC_API_KEY`）のみが `.env` から抽出されて `data/env/env` に書き込まれ、コンテナの `/workspace/env-dir/env` にマウントされてエントリポイントスクリプトによって読み込まれます。これにより、`.env` 内の他の環境変数がエージェントにさらされるのを防ぎます。この回避策が必要な理由は、一部のコンテナランタイムにおいて `-i`（パイプされた stdin を使用する対話モード）を使用すると `-e` 環境変数が失われるためです。
 
-### Changing the Assistant Name
+### アシスタント名の変更
 
-Set the `ASSISTANT_NAME` environment variable:
+`ASSISTANT_NAME` 環境変数を設定します：
 
 ```bash
 ASSISTANT_NAME=Bot npm start
 ```
 
-Or edit the default in `src/config.ts`. This changes:
-- The trigger pattern (messages must start with `@YourName`)
-- The response prefix (`YourName:` added automatically)
+または `src/config.ts` のデフォルト値を編集します。これにより以下が変更されます：
+- トリガーパターン（メッセージは `@YourName` で始まる必要があります）
+- レスポンスのプレフィックス（`YourName:` が自動的に付与されます）
 
-### Placeholder Values in launchd
+### launchd のプレースホルダー値
 
-Files with `{{PLACEHOLDER}}` values need to be configured:
-- `{{PROJECT_ROOT}}` - Absolute path to your nanoclaw installation
-- `{{NODE_PATH}}` - Path to node binary (detected via `which node`)
-- `{{HOME}}` - User's home directory
+`{{PLACEHOLDER}}` 値を持つファイルは設定が必要です：
+- `{{PROJECT_ROOT}}` - nanoclaw がインストールされている絶対パス
+- `{{NODE_PATH}}` - node バイナリのパス (`which node` で確認)
+- `{{HOME}}` - ユーザーのホームディレクトリ
 
 ---
 
-## Memory System
+## メORY システム
 
-NanoClaw uses a hierarchical memory system based on CLAUDE.md files.
+NanoClaw は、CLAUDE.md ファイルに基づいた階層的なメモリシステムを使用します。
 
-### Memory Hierarchy
+### メモリ階層
 
-| Level | Location | Read By | Written By | Purpose |
+| レベル | 場所 | 読み取り | 書き込み | 目的 |
 |-------|----------|---------|------------|---------|
-| **Global** | `groups/CLAUDE.md` | All groups | Main only | Preferences, facts, context shared across all conversations |
-| **Group** | `groups/{name}/CLAUDE.md` | That group | That group | Group-specific context, conversation memory |
-| **Files** | `groups/{name}/*.md` | That group | That group | Notes, research, documents created during conversation |
+| **グローバル** | `groups/CLAUDE.md` | すべてのグループ | メインのみ | 設定、事実、すべての会話で共有されるコンテキスト |
+| **グループ** | `groups/{name}/CLAUDE.md` | そのグループ | そのグループ | グループ固有のコンテキスト、会話のメモリ |
+| **ファイル** | `groups/{name}/*.md` | そのグループ | そのグループ | 会話中に作成されたノート、調査、ドキュメント |
 
-### How Memory Works
+### メモリの仕組み
 
-1. **Agent Context Loading**
-   - Agent runs with `cwd` set to `groups/{group-name}/`
-   - Claude Agent SDK with `settingSources: ['project']` automatically loads:
-     - `../CLAUDE.md` (parent directory = global memory)
-     - `./CLAUDE.md` (current directory = group memory)
+1. **エージェントコンテキストのロード**
+   - エージェントは `cwd`（カレントディレクトリ）を `groups/{group-name}/` に設定して実行されます
+   - Claude Agent SDK は `settingSources: ['project']` により、以下を自動的にロードします：
+     - `../CLAUDE.md` (親ディレクトリ = グローバルメモリ)
+     - `./CLAUDE.md` (カレントディレクトリ = グループメモリ)
 
-2. **Writing Memory**
-   - When user says "remember this", agent writes to `./CLAUDE.md`
-   - When user says "remember this globally" (main channel only), agent writes to `../CLAUDE.md`
-   - Agent can create files like `notes.md`, `research.md` in the group folder
+2. **メモリの書き込み**
+   - ユーザーが「これを覚えておいて」と言うと、エージェントは `./CLAUDE.md` に書き込みます
+   - ユーザーが「これをグローバルに覚えておいて」と言うと（メインチャネルのみ）、エージェントは `../CLAUDE.md` に書き込みます
+   - エージェントはグループフォルダ内に `notes.md` や `research.md` などのファイルを作成できます
 
-3. **Main Channel Privileges**
-   - Only the "main" group (self-chat) can write to global memory
-   - Main can manage registered groups and schedule tasks for any group
-   - Main can configure additional directory mounts for any group
-   - All groups have Bash access (safe because it runs inside container)
-
----
-
-## Session Management
-
-Sessions enable conversation continuity - Claude remembers what you talked about.
-
-### How Sessions Work
-
-1. Each group has a session ID stored in SQLite (`sessions` table, keyed by `group_folder`)
-2. Session ID is passed to Claude Agent SDK's `resume` option
-3. Claude continues the conversation with full context
-4. Session transcripts are stored as JSONL files in `data/sessions/{group}/.claude/`
+3. **メインチャネルの特権**
+   - 「メイン」グループ（自分自身とのチャット）のみがグローバルメモリに書き込めます
+   - メインは登録済みグループの管理や、任意のグループのタスクのスケジュールを行えます
+   - メインは任意のグループに対して追加のディレクトリマウントを設定できます
+   - すべてのグループが Bash アクセス権を持ちます（コンテナ内で実行されるため安全です）
 
 ---
 
-## Message Flow
+## セッション管理
 
-### Incoming Message Flow
+セッションにより会話の継続性が確保されます。Claude は以前に話した内容を記憶します。
+
+### セッションの仕組み
+
+1. 各グループは SQLite に保存されたセッション ID を持ちます（`sessions` テーブル、キーは `group_folder`）
+2. セッション ID は Claude Agent SDK の `resume` オプションに渡されます
+3. Claude は完全なコンテキストを持って会話を継続します
+4. セッションの履歴は `data/sessions/{group}/.claude/` に JSONL ファイルとして保存されます
+
+---
+
+## メッセージフロー
+
+### 受信メッセージフロー
 
 ```
-1. User sends a message via any connected channel
+1. ユーザーがいずれかの接続済みチャネルを介してメッセージを送信
    │
    ▼
-2. Channel receives message (e.g. Baileys for WhatsApp, Bot API for Telegram)
+2. チャネルがメッセージを受信 (例: WhatsApp なら Baileys、Telegram なら Bot API)
    │
    ▼
-3. Message stored in SQLite (store/messages.db)
+3. メッセージが SQLite に保存される (store/messages.db)
    │
    ▼
-4. Message loop polls SQLite (every 2 seconds)
+4. メッセージループが SQLite をポーリング (2秒ごと)
    │
    ▼
-5. Router checks:
-   ├── Is chat_jid in registered groups (SQLite)? → No: ignore
-   └── Does message match trigger pattern? → No: store but don't process
+5. ルーターがチェック：
+   ├── chat_jid は登録済みグループ (SQLite) か？ → No: 無視
+   └── メッセージはトリガーパターンに一致するか？ → No: 保存するが処理はしない
    │
    ▼
-6. Router catches up conversation:
-   ├── Fetch all messages since last agent interaction
-   ├── Format with timestamp and sender name
-   └── Build prompt with full conversation context
+6. ルーターが会話を追いつかせる：
+   ├── 最後のエージェント応答以降のすべてのメッセージを取得
+   ├── タイムスタンプと送信者名でフォーマット
+   └── 会話コンテキスト全体を含めたプロンプトを構築
    │
    ▼
-7. Router invokes Claude Agent SDK:
+7. ルーターが Claude Agent SDK を呼び出し：
    ├── cwd: groups/{group-name}/
-   ├── prompt: conversation history + current message
-   ├── resume: session_id (for continuity)
-   └── mcpServers: nanoclaw (scheduler)
+   ├── prompt: 会話履歴 + 現在のメッセージ
+   ├── resume: session_id (継続性のため)
+   └── mcpServers: nanoclaw (スケジューラ)
    │
    ▼
-8. Claude processes message:
-   ├── Reads CLAUDE.md files for context
-   └── Uses tools as needed (search, email, etc.)
+8. Claude がメッセージを処理：
+   ├── コンテキストとして CLAUDE.md ファイルを読み込む
+   └── 必要に応じてツールを使用 (検索、メールなど)
    │
    ▼
-9. Router prefixes response with assistant name and sends via the owning channel
+9. ルーターがレスポンスにアシスタント名を付与し、対象のチャネル経由で送信
    │
    ▼
-10. Router updates last agent timestamp and saves session ID
+10. ルーターが最後のエージェントタイムスタンプを更新し、セッション ID を保存
 ```
 
-### Trigger Word Matching
+### トリガーワードの照合
 
-Messages must start with the trigger pattern (default: `@Andy`):
-- `@Andy what's the weather?` → ✅ Triggers Claude
-- `@andy help me` → ✅ Triggers (case insensitive)
-- `Hey @Andy` → ❌ Ignored (trigger not at start)
-- `What's up?` → ❌ Ignored (no trigger)
+メッセージはトリガーパターン（デフォルト： `@Andy`）で始まる必要があります：
+- `@Andy 天気はどう？` → ✅ Claude が反応
+- `@andy 助けて` → ✅ 反応（大文字小文字を区別しない）
+- `ねえ @Andy` → ❌ 無視（トリガーが先頭にない）
+- `元気？` → ❌ 無視（トリガーなし）
 
-### Conversation Catch-Up
+### 会話のキャッチアップ
 
-When a triggered message arrives, the agent receives all messages since its last interaction in that chat. Each message is formatted with timestamp and sender name:
+トリガーメッセージが届くと、エージェントはそのチャットでの前回の対話以降のすべてのメッセージを受け取ります。各メッセージはタイムスタンプと送信者名でフォーマットされます：
 
 ```
-[Jan 31 2:32 PM] John: hey everyone, should we do pizza tonight?
-[Jan 31 2:33 PM] Sarah: sounds good to me
-[Jan 31 2:35 PM] John: @Andy what toppings do you recommend?
+[1月31日 2:32 PM] John: みんな、今夜はピザにしない？
+[1月31日 2:33 PM] Sarah: いいね
+[1月31日 2:35 PM] John: @Andy どのおすすめのトッピングがある？
 ```
 
-This allows the agent to understand the conversation context even if it wasn't mentioned in every message.
+これにより、エージェントはすべてのメッセージで言及されていなくても、会話のコンテキストを理解できます。
 
 ---
 
-## Commands
+## コマンド
 
-### Commands Available in Any Group
+### どのグループでも使用可能なコマンド
 
-| Command | Example | Effect |
+| コマンド | 例 | 効果 |
 |---------|---------|--------|
-| `@Assistant [message]` | `@Andy what's the weather?` | Talk to Claude |
+| `@Assistant [メッセージ]` | `@Andy 天気はどう？` | Claude と話す |
 
-### Commands Available in Main Channel Only
+### メインチャネルでのみ使用可能なコマンド
 
-| Command | Example | Effect |
+| コマンド | 例 | 効果 |
 |---------|---------|--------|
-| `@Assistant add group "Name"` | `@Andy add group "Family Chat"` | Register a new group |
-| `@Assistant remove group "Name"` | `@Andy remove group "Work Team"` | Unregister a group |
-| `@Assistant list groups` | `@Andy list groups` | Show registered groups |
-| `@Assistant remember [fact]` | `@Andy remember I prefer dark mode` | Add to global memory |
+| `@Assistant add group "名前"` | `@Andy add group "家族チャット"` | 新しいグループを登録する |
+| `@Assistant remove group "名前"` | `@Andy remove group "仕事チーム"` | グループの登録を解除する |
+| `@Assistant list groups` | `@Andy list groups` | 登録済みグループを表示する |
+| `@Assistant remember [事実]` | `@Andy remember 私はダークモードが好きです` | グローバルメモリに追加する |
 
 ---
 
-## Scheduled Tasks
+## 定期実行タスク
 
-NanoClaw has a built-in scheduler that runs tasks as full agents in their group's context.
+NanoClaw は、グループのコンテキスト内でフル機能のエージェントとしてタスクを実行するビルトインスケジューラを備えています。
 
-### How Scheduling Works
+### スケジューリングの仕組み
 
-1. **Group Context**: Tasks created in a group run with that group's working directory and memory
-2. **Full Agent Capabilities**: Scheduled tasks have access to all tools (WebSearch, file operations, etc.)
-3. **Optional Messaging**: Tasks can send messages to their group using the `send_message` tool, or complete silently
-4. **Main Channel Privileges**: The main channel can schedule tasks for any group and view all tasks
+1. **グループコンテキスト**: グループ内で作成されたタスクは、そのグループの作業ディレクトリとメモリを使用して実行されます。
+2. **フルエージェント機能**: 定期実行タスクはすべてのツール（WebSearch、ファイル操作など）にアクセスできます。
+3. **オプションのメッセージ送信**: タスクは `send_message` ツールを使用してグループにメッセージを送信することも、サイレントに完了することもできます。
+4. **メインチャネルの特権**: メインチャネルは任意のグループのタスクをスケジュールし、すべてのタスクを表示できます。
 
-### Schedule Types
+### スケジュールタイプ
 
-| Type | Value Format | Example |
+| タイプ | 値の形式 | 例 |
 |------|--------------|---------|
-| `cron` | Cron expression | `0 9 * * 1` (Mondays at 9am) |
-| `interval` | Milliseconds | `3600000` (every hour) |
-| `once` | ISO timestamp | `2024-12-25T09:00:00Z` |
+| `cron` | Cron 式 | `0 9 * * 1` (月曜日の午前9時) |
+| `interval` | ミリ秒 | `3600000` (1時間ごと) |
+| `once` | ISO タイムスタンプ | `2024-12-25T09:00:00Z` |
 
-### Creating a Task
+### タスクの作成
 
 ```
-User: @Andy remind me every Monday at 9am to review the weekly metrics
+ユーザー: @Andy 毎週月曜の午前9時に、週次メトリクスを確認するようリマインドして
 
-Claude: [calls mcp__nanoclaw__schedule_task]
+Claude: [mcp__nanoclaw__schedule_task を呼び出し]
         {
-          "prompt": "Send a reminder to review weekly metrics. Be encouraging!",
+          "prompt": "週次メトリクスの確認をリマインドしてください。励ますような感じで！",
           "schedule_type": "cron",
           "schedule_value": "0 9 * * 1"
         }
 
-Claude: Done! I'll remind you every Monday at 9am.
+Claude: 了解しました！毎週月曜の午前9時にリマインドします。
 ```
 
-### One-Time Tasks
+### 単発タスク
 
 ```
-User: @Andy at 5pm today, send me a summary of today's emails
+ユーザー: @Andy 今日の午後5時に、今日のメールの要約を送って
 
-Claude: [calls mcp__nanoclaw__schedule_task]
+Claude: [mcp__nanoclaw__schedule_task を呼び出し]
         {
-          "prompt": "Search for today's emails, summarize the important ones, and send the summary to the group.",
+          "prompt": "今日のメールを検索し、重要なものを要約してグループに送信してください。",
           "schedule_type": "once",
           "schedule_value": "2024-01-31T17:00:00Z"
         }
 ```
 
-### Managing Tasks
+### タスクの管理
 
-From any group:
-- `@Andy list my scheduled tasks` - View tasks for this group
-- `@Andy pause task [id]` - Pause a task
-- `@Andy resume task [id]` - Resume a paused task
-- `@Andy cancel task [id]` - Delete a task
+どのグループからでも：
+- `@Andy list my scheduled tasks` - このグループのタスクを表示
+- `@Andy pause task [id]` - タスクを一時停止
+- `@Andy resume task [id]` - 一時停止中のタスクを再開
+- `@Andy cancel task [id]` - タスクを削除
 
-From main channel:
-- `@Andy list all tasks` - View tasks from all groups
-- `@Andy schedule task for "Family Chat": [prompt]` - Schedule for another group
+メインチャネルから：
+- `@Andy list all tasks` - すべてのグループのタスクを表示
+- `@Andy schedule task for "家族チャット": [プロンプト]` - 他のグループのタスクをスケジュール
 
 ---
 
-## MCP Servers
+## MCP サーバー
 
-### NanoClaw MCP (built-in)
+### NanoClaw MCP (ビルトイン)
 
-The `nanoclaw` MCP server is created dynamically per agent call with the current group's context.
+`nanoclaw` MCP サーバーは、現在のグループのコンテキストを使用してエージェント呼び出しごとに動的に作成されます。
 
-**Available Tools:**
-| Tool | Purpose |
+**利用可能なツール：**
+| ツール | 目的 |
 |------|---------|
-| `schedule_task` | Schedule a recurring or one-time task |
-| `list_tasks` | Show tasks (group's tasks, or all if main) |
-| `get_task` | Get task details and run history |
-| `update_task` | Modify task prompt or schedule |
-| `pause_task` | Pause a task |
-| `resume_task` | Resume a paused task |
-| `cancel_task` | Delete a task |
-| `send_message` | Send a message to the group via its channel |
+| `schedule_task` | 定期実行または単発のタスクをスケジュールする |
+| `list_tasks` | タスクを表示する（グループ内、またはメインならすべて） |
+| `get_task` | タスクの詳細と実行履歴を取得する |
+| `update_task` | タスクのプロンプトやスケジュールを修正する |
+| `pause_task` | タスクを一時停止する |
+| `resume_task` | 一時停止中のタスクを再開する |
+| `cancel_task` | タスクを削除する |
+| `send_message` | チャネル経由でグループにメッセージを送信する |
 
 ---
 
-## Deployment
+## デプロイ
 
-NanoClaw runs as a single macOS launchd service.
+NanoClaw は単一の macOS launchd サービスとして実行されます。
 
-### Startup Sequence
+### 起動シーケンス
 
-When NanoClaw starts, it:
-1. **Ensures container runtime is running** - Automatically starts it if needed; kills orphaned NanoClaw containers from previous runs
-2. Initializes the SQLite database (migrates from JSON files if they exist)
-3. Loads state from SQLite (registered groups, sessions, router state)
-4. **Connects channels** — loops through registered channels, instantiates those with credentials, calls `connect()` on each
-5. Once at least one channel is connected:
-   - Starts the scheduler loop
-   - Starts the IPC watcher for container messages
-   - Sets up the per-group queue with `processGroupMessages`
-   - Recovers any unprocessed messages from before shutdown
-   - Starts the message polling loop
+NanoClaw が起動すると：
+1. **コンテナランタイムが実行されていることを確認** - 必要に応じて自動的に起動し、以前の実行から残っている孤立したコンテナを終了します。
+2. SQLite データベースを初期化します（JSON ファイルがあればマイグレーションします）。
+3. SQLite からステートをロードします（登録済みグループ、セッション、ルーターステート）。
+4. **チャネルを接続** — 登録済みチャネルをループし、認証情報があるものをインスタンス化して `connect()` を呼び出します。
+5. 少なくとも 1 つのチャネルが接続されたら：
+   - スケジューラループを開始
+   - コンテナメッセージ用の IPC ウォッチャーを開始
+   - `processGroupMessages` でグループごとのキューをセットアップ
+   - シャットダウン前に未処理だったメッセージを復旧
+   - メッセージポーリングループを開始
 
-### Service: com.nanoclaw
+### サービス: com.nanoclaw
 
 **launchd/com.nanoclaw.plist:**
 ```xml
@@ -690,96 +690,96 @@ When NanoClaw starts, it:
 </plist>
 ```
 
-### Managing the Service
+### サービスの管理
 
 ```bash
-# Install service
+# サービスをインストール
 cp launchd/com.nanoclaw.plist ~/Library/LaunchAgents/
 
-# Start service
+# サービスを開始
 launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
 
-# Stop service
+# サービスを停止
 launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
 
-# Check status
+# ステータスを確認
 launchctl list | grep nanoclaw
 
-# View logs
+# ログを表示
 tail -f logs/nanoclaw.log
 ```
 
 ---
 
-## Security Considerations
+## セキュリティ上の考慮事項
 
-### Container Isolation
+### コンテナによる隔離
 
-All agents run inside containers (lightweight Linux VMs), providing:
-- **Filesystem isolation**: Agents can only access mounted directories
-- **Safe Bash access**: Commands run inside the container, not on your Mac
-- **Network isolation**: Can be configured per-container if needed
-- **Process isolation**: Container processes can't affect the host
-- **Non-root user**: Container runs as unprivileged `node` user (uid 1000)
+すべてのエージェントはコンテナ（軽量な Linux VM）内で実行され、以下を提供します：
+- **ファイルシステムの隔離**: エージェントはマウントされたディレクトリにしかアクセスできません
+- **安全な Bash アクセス**: コマンドは Mac 上ではなくコンテナ内で実行されます
+- **ネットワークの隔離**: 必要に応じてコンテナごとに設定可能です
+- **プロセスの隔離**: コンテナ内のプロセスはホストに影響を与えられません
+- **非 root ユーザー**: コンテナは非特権の `node` ユーザー (uid 1000) で実行されます
 
-### Prompt Injection Risk
+### プロンプトインジェクションのリスク
 
-WhatsApp messages could contain malicious instructions attempting to manipulate Claude's behavior.
+メッセージに、Claude の動作を操作しようとする悪意のある指示が含まれている可能性があります。
 
-**Mitigations:**
-- Container isolation limits blast radius
-- Only registered groups are processed
-- Trigger word required (reduces accidental processing)
-- Agents can only access their group's mounted directories
-- Main can configure additional directories per group
-- Claude's built-in safety training
+**緩和策：**
+- コンテナによる隔離が影響範囲を限定します
+- 登録されたグループのみが処理されます
+- トリガーワードが必須です（誤処理を減らします）
+- エージェントはそのグループにマウントされたディレクトリにしかアクセスできません
+- メインはグループごとに追加のディレクトリを設定できます
+- Claude の組み込みの安全性トレーニング
 
-**Recommendations:**
-- Only register trusted groups
-- Review additional directory mounts carefully
-- Review scheduled tasks periodically
-- Monitor logs for unusual activity
+**推奨事項：**
+- 信頼できるグループのみを登録してください
+- 追加のディレクトリマウントは慎重に確認してください
+- 定期実行タスクを定期的に見直してください
+- 異常な活動がないかログを監視してください
 
-### Credential Storage
+### 認証情報の保存
 
-| Credential | Storage Location | Notes |
+| 認証情報 | 保存場所 | 備考 |
 |------------|------------------|-------|
-| Claude CLI Auth | data/sessions/{group}/.claude/ | Per-group isolation, mounted to /home/node/.claude/ |
-| WhatsApp Session | store/auth/ | Auto-created, persists ~20 days |
+| Claude CLI 認証 | data/sessions/{group}/.claude/ | グループごとの隔離、/home/node/.claude/ にマウント |
+| WhatsApp セッション | store/auth/ | 自動作成、約20日間持続 |
 
-### File Permissions
+### ファイルパーミッション
 
-The groups/ folder contains personal memory and should be protected:
+groups/ フォルダには個人のメモリが含まれるため、保護する必要があります：
 ```bash
 chmod 700 groups/
 ```
 
 ---
 
-## Troubleshooting
+## トラブルシューティング
 
-### Common Issues
+### よくある問題
 
-| Issue | Cause | Solution |
+| 問題 | 原因 | 解決策 |
 |-------|-------|----------|
-| No response to messages | Service not running | Check `launchctl list | grep nanoclaw` |
-| "Claude Code process exited with code 1" | Container runtime failed to start | Check logs; NanoClaw auto-starts container runtime but may fail |
-| "Claude Code process exited with code 1" | Session mount path wrong | Ensure mount is to `/home/node/.claude/` not `/root/.claude/` |
-| Session not continuing | Session ID not saved | Check SQLite: `sqlite3 store/messages.db "SELECT * FROM sessions"` |
-| Session not continuing | Mount path mismatch | Container user is `node` with HOME=/home/node; sessions must be at `/home/node/.claude/` |
-| "QR code expired" | WhatsApp session expired | Delete store/auth/ and restart |
-| "No groups registered" | Haven't added groups | Use `@Andy add group "Name"` in main |
+| メッセージに反応しない | サービスが実行されていない | `launchctl list | grep nanoclaw` を確認 |
+| "Claude Code process exited with code 1" | コンテナランタイムの起動失敗 | ログを確認。自動起動を試みますが失敗することがあります。 |
+| "Claude Code process exited with code 1" | セッションのマウントパスの間違い | マウント先が `/home/node/.claude/` であり `/root/.claude/` でないことを確認 |
+| セッションが継続しない | セッション ID が保存されていない | SQLite を確認: `sqlite3 store/messages.db "SELECT * FROM sessions"` |
+| セッションが継続しない | マウントパスの不一致 | コンテナユーザーは `node` (HOME=/home/node) です。セッションは `/home/node/.claude/` にある必要があります。 |
+| "QR code expired" | WhatsApp セッションの期限切れ | store/auth/ を削除して再起動 |
+| "No groups registered" | グループが追加されていない | メインチャネルで `@Andy add group "名前"` を使用 |
 
-### Log Location
+### ログの場所
 
-- `logs/nanoclaw.log` - stdout
-- `logs/nanoclaw.error.log` - stderr
+- `logs/nanoclaw.log` - 標準出力
+- `logs/nanoclaw.error.log` - 標準エラー出力
 
-### Debug Mode
+### デバッグモード
 
-Run manually for verbose output:
+詳細な出力を得るには手動で実行してください：
 ```bash
 npm run dev
-# or
+# または
 node dist/index.js
 ```
