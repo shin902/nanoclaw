@@ -1,10 +1,10 @@
 /**
- * Mount Security Module for NanoClaw
+ * NanoClaw 用マウントセキュリティモジュール
  *
- * Validates additional mounts against an allowlist stored OUTSIDE the project root.
- * This prevents container agents from modifying security configuration.
+ * プロジェクトルートの「外」にある許可リストに照らして追加マウントを検証します。
+ * これにより、コンテナエージェントがセキュリティ設定を変更することを防ぎます。
  *
- * Allowlist location: ~/.config/nanoclaw/mount-allowlist.json
+ * 許可リストの場所: ~/.config/nanoclaw/mount-allowlist.json
  */
 import fs from 'fs';
 import os from 'os';
@@ -19,12 +19,12 @@ const logger = pino({
   transport: { target: 'pino-pretty', options: { colorize: true } },
 });
 
-// Cache the allowlist in memory - only reloads on process restart
+// 許可リストをメモリにキャッシュ - プロセス再起動時にのみ再読み込みされる
 let cachedAllowlist: MountAllowlist | null = null;
 let allowlistLoadError: string | null = null;
 
 /**
- * Default blocked patterns - paths that should never be mounted
+ * デフォルトの拒否パターン - 決してマウントすべきでないパス
  */
 const DEFAULT_BLOCKED_PATTERNS = [
   '.ssh',
@@ -47,9 +47,9 @@ const DEFAULT_BLOCKED_PATTERNS = [
 ];
 
 /**
- * Load the mount allowlist from the external config location.
- * Returns null if the file doesn't exist or is invalid.
- * Result is cached in memory for the lifetime of the process.
+ * 外部設定からマウント許可リストを読み込みます。
+ * ファイルが存在しないか不正な場合は null を返します。
+ * 結果はプロセスの生存期間中、メモリにキャッシュされます。
  */
 export function loadMountAllowlist(): MountAllowlist | null {
   if (cachedAllowlist !== null) {
@@ -57,7 +57,7 @@ export function loadMountAllowlist(): MountAllowlist | null {
   }
 
   if (allowlistLoadError !== null) {
-    // Already tried and failed, don't spam logs
+    // すでに試行して失敗しているため、ログを出し続けない
     return null;
   }
 
@@ -75,7 +75,7 @@ export function loadMountAllowlist(): MountAllowlist | null {
     const content = fs.readFileSync(MOUNT_ALLOWLIST_PATH, 'utf-8');
     const allowlist = JSON.parse(content) as MountAllowlist;
 
-    // Validate structure
+    // 構造を検証
     if (!Array.isArray(allowlist.allowedRoots)) {
       throw new Error('allowedRoots must be an array');
     }
@@ -88,7 +88,7 @@ export function loadMountAllowlist(): MountAllowlist | null {
       throw new Error('nonMainReadOnly must be a boolean');
     }
 
-    // Merge with default blocked patterns
+    // デフォルトの拒否パターンとマージ
     const mergedBlockedPatterns = [
       ...new Set([...DEFAULT_BLOCKED_PATTERNS, ...allowlist.blockedPatterns]),
     ];
@@ -119,7 +119,7 @@ export function loadMountAllowlist(): MountAllowlist | null {
 }
 
 /**
- * Expand ~ to home directory and resolve to absolute path
+ * ~ をホームディレクトリに展開し、絶対パスに解決します。
  */
 function expandPath(p: string): string {
   const homeDir = process.env.HOME || os.homedir();
@@ -133,8 +133,8 @@ function expandPath(p: string): string {
 }
 
 /**
- * Get the real path, resolving symlinks.
- * Returns null if the path doesn't exist.
+ * シンボリックリンクを解決して、実際のパスを取得します。
+ * パスが存在しない場合は null を返します。
  */
 function getRealPath(p: string): string | null {
   try {
@@ -145,7 +145,7 @@ function getRealPath(p: string): string | null {
 }
 
 /**
- * Check if a path matches any blocked pattern
+ * パスがいずれかの拒否パターンに一致するか確認します。
  */
 function matchesBlockedPattern(
   realPath: string,
@@ -154,14 +154,14 @@ function matchesBlockedPattern(
   const pathParts = realPath.split(path.sep);
 
   for (const pattern of blockedPatterns) {
-    // Check if any path component matches the pattern
+    // いずれかのパスコンポーネントがパターンに一致するか確認
     for (const part of pathParts) {
       if (part === pattern || part.includes(pattern)) {
         return pattern;
       }
     }
 
-    // Also check if the full path contains the pattern
+    // フルパスにパターンが含まれているかも確認
     if (realPath.includes(pattern)) {
       return pattern;
     }
@@ -171,7 +171,7 @@ function matchesBlockedPattern(
 }
 
 /**
- * Check if a real path is under an allowed root
+ * 実際のパスがいずれかの許可されたルート配下にあるか確認します。
  */
 function findAllowedRoot(
   realPath: string,
@@ -182,11 +182,11 @@ function findAllowedRoot(
     const realRoot = getRealPath(expandedRoot);
 
     if (realRoot === null) {
-      // Allowed root doesn't exist, skip it
+      // 許可されたルートが存在しない場合はスキップ
       continue;
     }
 
-    // Check if realPath is under realRoot
+    // realPath が realRoot 配下にあるか確認
     const relative = path.relative(realRoot, realPath);
     if (!relative.startsWith('..') && !path.isAbsolute(relative)) {
       return root;
@@ -197,20 +197,20 @@ function findAllowedRoot(
 }
 
 /**
- * Validate the container path to prevent escaping /workspace/extra/
+ * /workspace/extra/ からの脱出を防ぐため、コンテナパスを検証します。
  */
 function isValidContainerPath(containerPath: string): boolean {
-  // Must not contain .. to prevent path traversal
+  // パストラバーサルを防ぐため .. を含んではならない
   if (containerPath.includes('..')) {
     return false;
   }
 
-  // Must not be absolute (it will be prefixed with /workspace/extra/)
+  // 絶対パスであってはならない（/workspace/extra/ が付与されるため）
   if (containerPath.startsWith('/')) {
     return false;
   }
 
-  // Must not be empty
+  // 空であってはならない
   if (!containerPath || containerPath.trim() === '') {
     return false;
   }
@@ -227,8 +227,8 @@ export interface MountValidationResult {
 }
 
 /**
- * Validate a single additional mount against the allowlist.
- * Returns validation result with reason.
+ * 許可リストに照らして単一の追加マウントを検証します。
+ * 理由を含めた検証結果を返します。
  */
 export function validateMount(
   mount: AdditionalMount,
@@ -236,7 +236,7 @@ export function validateMount(
 ): MountValidationResult {
   const allowlist = loadMountAllowlist();
 
-  // If no allowlist, block all additional mounts
+  // 許可リストがない場合は、すべての追加マウントを拒否
   if (allowlist === null) {
     return {
       allowed: false,
@@ -244,10 +244,10 @@ export function validateMount(
     };
   }
 
-  // Derive containerPath from hostPath basename if not specified
+  // 指定がない場合は hostPath のベース名から containerPath を導出
   const containerPath = mount.containerPath || path.basename(mount.hostPath);
 
-  // Validate container path (cheap check)
+  // コンテナパスの検証（安価なチェック）
   if (!isValidContainerPath(containerPath)) {
     return {
       allowed: false,
@@ -255,7 +255,7 @@ export function validateMount(
     };
   }
 
-  // Expand and resolve the host path
+  // ホストパスを展開して解決
   const expandedPath = expandPath(mount.hostPath);
   const realPath = getRealPath(expandedPath);
 
@@ -266,7 +266,7 @@ export function validateMount(
     };
   }
 
-  // Check against blocked patterns
+  // 拒否パターンとの照合
   const blockedMatch = matchesBlockedPattern(
     realPath,
     allowlist.blockedPatterns,
@@ -278,7 +278,7 @@ export function validateMount(
     };
   }
 
-  // Check if under an allowed root
+  // 許可されたルート配下にあるか確認
   const allowedRoot = findAllowedRoot(realPath, allowlist.allowedRoots);
   if (allowedRoot === null) {
     return {
@@ -289,13 +289,13 @@ export function validateMount(
     };
   }
 
-  // Determine effective readonly status
+  // 実行時の読み取り専用ステータスを決定
   const requestedReadWrite = mount.readonly === false;
-  let effectiveReadonly = true; // Default to readonly
+  let effectiveReadonly = true; // デフォルトは読み取り専用
 
   if (requestedReadWrite) {
     if (!isMain && allowlist.nonMainReadOnly) {
-      // Non-main groups forced to read-only
+      // メイン以外のグループは強制的に読み取り専用
       effectiveReadonly = true;
       logger.info(
         {
@@ -304,7 +304,7 @@ export function validateMount(
         'Mount forced to read-only for non-main group',
       );
     } else if (!allowedRoot.allowReadWrite) {
-      // Root doesn't allow read-write
+      // ルートが読み書きを許可していない
       effectiveReadonly = true;
       logger.info(
         {
@@ -314,7 +314,7 @@ export function validateMount(
         'Mount forced to read-only - root does not allow read-write',
       );
     } else {
-      // Read-write allowed
+      // 読み書きを許可
       effectiveReadonly = false;
     }
   }
@@ -329,9 +329,9 @@ export function validateMount(
 }
 
 /**
- * Validate all additional mounts for a group.
- * Returns array of validated mounts (only those that passed validation).
- * Logs warnings for rejected mounts.
+ * グループのすべての追加マウントを検証します。
+ * 検証を通過したマウントのみを配列で返します。
+ * 拒否されたマウントについては警告ログを出力します。
  */
 export function validateAdditionalMounts(
   mounts: AdditionalMount[],
@@ -385,7 +385,7 @@ export function validateAdditionalMounts(
 }
 
 /**
- * Generate a template allowlist file for users to customize
+ * ユーザーがカスタマイズするための許可リストのテンプレートファイルを生成します。
  */
 export function generateAllowlistTemplate(): string {
   const template: MountAllowlist = {
@@ -407,7 +407,7 @@ export function generateAllowlistTemplate(): string {
       },
     ],
     blockedPatterns: [
-      // Additional patterns beyond defaults
+      // デフォルト以外の追加パターン
       'password',
       'secret',
       'token',
