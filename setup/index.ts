@@ -1,6 +1,6 @@
 /**
- * Setup CLI entry point.
- * Usage: npx tsx setup/index.ts --step <name> [args...]
+ * セットアップ CLI エントリポイント。
+ * 使用法: npx tsx setup/index.ts --step <name> [args...]
  */
 import { logger } from '../src/logger.js';
 import { emitStatus } from './status.js';
@@ -24,7 +24,7 @@ async function main(): Promise<void> {
 
   if (stepIdx === -1 || !args[stepIdx + 1]) {
     console.error(
-      `Usage: npx tsx setup/index.ts --step <${Object.keys(STEPS).join('|')}> [args...]`,
+      `使用法: npx tsx setup/index.ts --step <${Object.keys(STEPS).join('|')}> [args...]`,
     );
     process.exit(1);
   }
@@ -36,8 +36,8 @@ async function main(): Promise<void> {
 
   const loader = STEPS[stepName];
   if (!loader) {
-    console.error(`Unknown step: ${stepName}`);
-    console.error(`Available steps: ${Object.keys(STEPS).join(', ')}`);
+    console.error(`未知のステップ: ${stepName}`);
+    console.error(`利用可能なステップ: ${Object.keys(STEPS).join(', ')}`);
     process.exit(1);
   }
 
@@ -46,7 +46,7 @@ async function main(): Promise<void> {
     await mod.run(stepArgs);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    logger.error({ err, step: stepName }, 'Setup step failed');
+    logger.error({ err, step: stepName }, 'セットアップステップが失敗しました');
     emitStatus(stepName.toUpperCase(), {
       STATUS: 'failed',
       ERROR: message,
