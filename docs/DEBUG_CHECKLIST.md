@@ -1,49 +1,49 @@
-# NanoClaw Debug Checklist
+# NanoClaw デバッグ・チェックリスト
 
-## Known Issues (2026-02-08)
+## 既知の問題 (2026-02-08)
 
-### 1. [FIXED] Resume branches from stale tree position
-When agent teams spawns subagent CLI processes, they write to the same session JSONL. On subsequent `query()` resumes, the CLI reads the JSONL but may pick a stale branch tip (from before the subagent activity), causing the agent's response to land on a branch the host never receives a `result` for. **Fix**: pass `resumeSessionAt` with the last assistant message UUID to explicitly anchor each resume.
+### 1. [修正済み] セッションツリーの古い位置から再開される問題
+エージェントチームがサブエージェントの CLI プロセスを起動すると、それらは同じセッション JSONL に書き込みます。その後の `query()` による再開時、CLI は JSONL を読み込みますが、（サブエージェントのアクティビティより前の）古いブランチの先端を選択してしまうことがあり、エージェントの応答がホスト側で `result` を受信できないブランチに記録されることがありました。**修正方法**: `resumeSessionAt` に最後のアシスタントメッセージの UUID を渡し、再開位置を明示的に固定するようにしました。
 
-### 2. IDLE_TIMEOUT == CONTAINER_TIMEOUT (both 30 min)
-Both timers fire at the same time, so containers always exit via hard SIGKILL (code 137) instead of graceful `_close` sentinel shutdown. The idle timeout should be shorter (e.g., 5 min) so containers wind down between messages, while container timeout stays at 30 min as a safety net for stuck agents.
+### 2. IDLE_TIMEOUT == CONTAINER_TIMEOUT (共に 30分)
+両方のタイマーが同時に作動するため、コンテナが `_close` センチネルによる正常な終了ではなく、常にハードな SIGKILL (終了コード 137) で終了してしまいます。メッセージ間でコンテナが徐々に終了するように、アイドルタイムアウトを短く（例：5分）し、コンテナタイムアウトは動かなくなったエージェントのためのセーフティネットとして 30分のままにすべきです。
 
-### 3. Cursor advanced before agent succeeds
-`processGroupMessages` advances `lastAgentTimestamp` before the agent runs. If the container times out, retries find no messages (cursor already past them). Messages are permanently lost on timeout.
+### 3. エージェントの成功前にカーソルが進んでしまう問題
+`processGroupMessages` は、エージェントが実行される前に `lastAgentTimestamp` を進めます。コンテナがタイムアウトした場合、リトライしてもメッセージが見つかりません（カーソルがすでにそれらを通過しているため）。タイムアウトが発生すると、メッセージは永久に失われます。
 
-## Quick Status Check
+## クイック・ステータスチェック
 
 ```bash
-# 1. Is the service running?
+# 1. サービスは実行中か？
 launchctl list | grep nanoclaw
-# Expected: PID  0  com.nanoclaw (PID = running, "-" = not running, non-zero exit = crashed)
+# 期待される結果: PID  0  com.nanoclaw (PID = 実行中, "-" = 未実行, 0以外の終了コード = クラッシュ)
 
-# 2. Any running containers?
+# 2. 実行中のコンテナはあるか？
 container ls --format '{{.Names}} {{.Status}}' 2>/dev/null | grep nanoclaw
 
-# 3. Any stopped/orphaned containers?
+# 3. 停止または孤立したコンテナはあるか？
 container ls -a --format '{{.Names}} {{.Status}}' 2>/dev/null | grep nanoclaw
 
-# 4. Recent errors in service log?
+# 4. サービスログに最近のエラーはあるか？
 grep -E 'ERROR|WARN' logs/nanoclaw.log | tail -20
 
-# 5. Is WhatsApp connected? (look for last connection event)
+# 5. WhatsApp は接続されているか？ (直近の接続イベントを確認)
 grep -E 'Connected to WhatsApp|Connection closed|connection.*close' logs/nanoclaw.log | tail -5
 
-# 6. Are groups loaded?
+# 6. グループはロードされているか？
 grep 'groupCount' logs/nanoclaw.log | tail -3
 ```
 
-## Session Transcript Branching
+## セッション履歴の分岐確認
 
 ```bash
-# Check for concurrent CLI processes in session debug logs
+# セッションデバッグログで並行する CLI プロセスを確認
 ls -la data/sessions/<group>/.claude/debug/
 
-# Count unique SDK processes that handled messages
-# Each .txt file = one CLI subprocess. Multiple = concurrent queries.
+# メッセージを処理したユニークな SDK プロセスをカウント
+# 各 .txt ファイル = 1つの CLI サブプロセス。複数ある場合はクエリが並行して走っています。
 
-# Check parentUuid branching in transcript
+# 履歴内の parentUuid の分岐を確認
 python3 -c "
 import json, sys
 lines = open('data/sessions/<group>/.claude/projects/-workspace-group/<session>.jsonl').read().strip().split('\n')
@@ -58,86 +58,86 @@ for i, line in enumerate(lines):
 "
 ```
 
-## Container Timeout Investigation
+## コンテナ・タイムアウトの調査
 
 ```bash
-# Check for recent timeouts
+# 最近のタイムアウトを確認
 grep -E 'Container timeout|timed out' logs/nanoclaw.log | tail -10
 
-# Check container log files for the timed-out container
+# タイムアウトしたコンテナのログファイルを確認
 ls -lt groups/*/logs/container-*.log | head -10
 
-# Read the most recent container log (replace path)
+# 最新のコンテナログを読み込む (パスを置き換えてください)
 cat groups/<group>/logs/container-<timestamp>.log
 
-# Check if retries were scheduled and what happened
+# リトライがスケジュールされたか、何が起きたかを確認
 grep -E 'Scheduling retry|retry|Max retries' logs/nanoclaw.log | tail -10
 ```
 
-## Agent Not Responding
+## エージェントが応答しない場合
 
 ```bash
-# Check if messages are being received from WhatsApp
+# WhatsApp からメッセージを受信しているか確認
 grep 'New messages' logs/nanoclaw.log | tail -10
 
-# Check if messages are being processed (container spawned)
+# メッセージが処理されているか（コンテナが起動したか）確認
 grep -E 'Processing messages|Spawning container' logs/nanoclaw.log | tail -10
 
-# Check if messages are being piped to active container
+# アクティブなコンテナにメッセージがパイプされているか確認
 grep -E 'Piped messages|sendMessage' logs/nanoclaw.log | tail -10
 
-# Check the queue state — any active containers?
+# キューの状態を確認 — アクティブなコンテナはあるか？
 grep -E 'Starting container|Container active|concurrency limit' logs/nanoclaw.log | tail -10
 
-# Check lastAgentTimestamp vs latest message timestamp
-sqlite3 store/messages.db "SELECT chat_jid, MAX(timestamp) as latest FROM messages GROUP BY chat_jid ORDER BY latest DESC LIMIT 5;"
+# lastAgentTimestamp と最新メッセージのタイムスタンプを比較
+sqlite3 store/messages.db \"SELECT chat_jid, MAX(timestamp) as latest FROM messages GROUP BY chat_jid ORDER BY latest DESC LIMIT 5;\"
 ```
 
-## Container Mount Issues
+## コンテナ・マウントの問題
 
 ```bash
-# Check mount validation logs (shows on container spawn)
+# マウント検証ログを確認 (コンテナ起動時に表示)
 grep -E 'Mount validated|Mount.*REJECTED|mount' logs/nanoclaw.log | tail -10
 
-# Verify the mount allowlist is readable
+# マウント許可リストが読み取り可能か確認
 cat ~/.config/nanoclaw/mount-allowlist.json
 
-# Check group's container_config in DB
-sqlite3 store/messages.db "SELECT name, container_config FROM registered_groups;"
+# DB 内のグループの container_config を確認
+sqlite3 store/messages.db \"SELECT name, container_config FROM registered_groups;\"
 
-# Test-run a container to check mounts (dry run)
-# Replace <group-folder> with the group's folder name
+# コンテナをテスト実行してマウントを確認 (ドライラン)
+# <group-folder> をグループのフォルダ名に置き換えてください
 container run -i --rm --entrypoint ls nanoclaw-agent:latest /workspace/extra/
 ```
 
-## WhatsApp Auth Issues
+## WhatsApp 認証の問題
 
 ```bash
-# Check if QR code was requested (means auth expired)
+# QR コードが要求されたか確認 (認証切れを意味します)
 grep 'QR\|authentication required\|qr' logs/nanoclaw.log | tail -5
 
-# Check auth files exist
+# 認証ファイルが存在するか確認
 ls -la store/auth/
 
-# Re-authenticate if needed
+# 必要に応じて再認証を行う
 npm run auth
 ```
 
-## Service Management
+## サービス管理
 
 ```bash
-# Restart the service
+# サービスを再起動
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 
-# View live logs
+# ライブログを表示
 tail -f logs/nanoclaw.log
 
-# Stop the service (careful — running containers are detached, not killed)
+# サービスを停止 (注意 — 実行中のコンテナは切り離されますが、終了はされません)
 launchctl bootout gui/$(id -u)/com.nanoclaw
 
-# Start the service
+# サービスを開始
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.nanoclaw.plist
 
-# Rebuild after code changes
+# コード変更後に再ビルドして再起動
 npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 ```
