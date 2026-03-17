@@ -1,14 +1,14 @@
 /**
- * Credential proxy for container isolation.
- * Containers connect here instead of directly to the Anthropic API.
- * The proxy injects real credentials so containers never see them.
+ * コンテナを分離するための認証情報プロキシ。
+ * コンテナは Anthropic API に直接接続する代わりに、ここを介して接続します。
+ * プロキシが実際の認証情報を注入するため、コンテナがそれらを知ることはありません。
  *
- * Two auth modes:
- *   API key:  Proxy injects x-api-key on every request.
- *   OAuth:    Container CLI exchanges its placeholder token for a temp
- *             API key via /api/oauth/claude_cli/create_api_key.
- *             Proxy injects real OAuth token on that exchange request;
- *             subsequent requests carry the temp key which is valid as-is.
+ * 2 つの認証モード:
+ *   API キー: プロキシがすべてのリクエストに x-api-key を注入します。
+ *   OAuth:   コンテナ CLI が /api/oauth/claude_cli/create_api_key を介して、
+ *            プレースホルダー・トークンを一時的な API キーに交換します。
+ *            プロキシはその交換リクエストに実際の OAuth トークンを注入します。
+ *            その後のリクエストは一時的なキーをそのまま使用します。
  */
 import { createServer, Server } from 'http';
 import { request as httpsRequest } from 'https';
@@ -57,20 +57,20 @@ export function startCredentialProxy(
             'content-length': body.length,
           };
 
-        // Strip hop-by-hop headers that must not be forwarded by proxies
+        // プロキシによって転送してはならないホップバイホップ・ヘッダーを削除
         delete headers['connection'];
         delete headers['keep-alive'];
         delete headers['transfer-encoding'];
 
         if (authMode === 'api-key') {
-          // API key mode: inject x-api-key on every request
+          // API キーモード: すべてのリクエストに x-api-key を注入
           delete headers['x-api-key'];
           headers['x-api-key'] = secrets.ANTHROPIC_API_KEY;
         } else {
-          // OAuth mode: replace placeholder Bearer token with the real one
-          // only when the container actually sends an Authorization header
-          // (exchange request + auth probes). Post-exchange requests use
-          // x-api-key only, so they pass through without token injection.
+          // OAuth モード: コンテナが実際に Authorization ヘッダーを送信したときのみ、
+          // プレースホルダーの Bearer トークンを本物のトークンに置き換える
+          // （交換リクエスト + 認証プローブ）。交換後のリクエストは x-api-key のみを
+          // 使用するため、トークン注入なしでそのまま通過する。
           if (headers['authorization']) {
             delete headers['authorization'];
             if (oauthToken) {
@@ -118,7 +118,7 @@ export function startCredentialProxy(
   });
 }
 
-/** Detect which auth mode the host is configured for. */
+/** ホストに設定されている認証モードを検出します。 */
 export function detectAuthMode(): AuthMode {
   const secrets = readEnvFile(['ANTHROPIC_API_KEY']);
   return secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
