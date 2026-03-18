@@ -24,7 +24,9 @@ Discord
   ↓ キューイング（チャンネルごとに直列化）
 コンテナ起動
   ↓ stdin経由でプロンプト送信
-@opencode-ai/sdk（エージェントループ・ツールコール・マルチプロバイダー）
+agent-runner（sdk/modelを見て分岐）
+  ├─ sdk: "claude"    → Claude Agent SDK
+  └─ sdk: "opencode"  → @opencode-ai/sdk
   ↓ 応答
 stdout経由で応答受信
   ↓
@@ -98,36 +100,39 @@ data/
 
 ## プロバイダー設計
 
-### SDK: `@opencode-ai/sdk`
+### SDK構成（2本立て）
 
-エージェントループ・ツールコール・マルチプロバイダー対応を全て抽象化してくれる。
-
-- 75+プロバイダー対応（Claude・GitHub Copilot・OpenAI Codex等）
-- エージェントループ（ツールコール→実行→結果返却→繰り返し）をビルトインで処理
-- `model: "copilot/gpt-4"` のような形式でプロバイダーを指定するだけ
-
-### 対応プロバイダー（予定）
-
-| プロバイダー | 認証方式 | 備考 |
+| sdk値 | 使うSDK | 対象 |
 |---|---|---|
-| Claude | Anthropic APIキー or OAuth | opencode SDKが処理 |
-| GitHub Copilot | GitHub Device Flow OAuth | opencode CLIで初回セットアップ |
-| OpenAI Codex | OAuth | opencode CLIで初回セットアップ |
+| `"claude"` | Claude Agent SDK | Claudeモデルのみ（垢バン回避のため公式SDK必須） |
+| `"opencode"` | `@opencode-ai/sdk` | Copilot・Codex・Minimax等75+プロバイダー |
+
+### config.jsonの形式
+
+```json
+{ "sdk": "claude", "model": "claude-opus-4-6" }
+{ "sdk": "opencode", "model": "copilot/gpt-4" }
+{ "sdk": "opencode", "model": "codex/..." }
+```
+
+`/model`コマンドで`sdk`と`model`を同時に変更する。不整合を防ぐため必ずセットで更新。
+
+### 対応モデル例
+
+| sdk | model例 |
+|---|---|
+| `claude` | `claude-opus-4-6` / `claude-sonnet-4-6` / `claude-haiku-4-5` |
+| `opencode` | `copilot/gpt-4` / `copilot/gpt-4o` / `codex/...` / `minimax/...` |
 
 ### 認証フロー
 
-全プロバイダー共通：
+**Claude Agent SDK:**
+- Anthropic APIキー or OAuth（NanoClawと同方式、Credential Proxy経由）
 
+**opencode SDK:**
 1. 初回のみ `opencode` CLIで `/connect` → Device Flow等でログイン
 2. トークンが `~/.local/share/opencode/auth.json` に保存される
 3. SDK実行時はそのファイルを参照するだけ
-
-Credential Proxyは不要になる可能性が高い（SDK側で吸収）。
-
-### プロバイダー切り替え
-
-`config.json`の`model`フィールドを書き換えるだけ。
-`/model`スラッシュコマンドで変更可能。
 
 ---
 
@@ -135,10 +140,11 @@ Credential Proxyは不要になる可能性が高い（SDK側で吸収）。
 
 ### 方針
 
-`@opencode-ai/sdk` に委譲。自前実装不要。
+SDKに委譲。自前実装不要。
 
-- エージェントループ（ツールコール→実行→返却→繰り返し）はSDKが処理
-- プロバイダー差異もSDKが吸収
+- `sdk: "claude"` → Claude Agent SDKのエージェントループ
+- `sdk: "opencode"` → opencode SDKのエージェントループ
+- 共通部分（IPCポーリング・stdout出力プロトコル）はagent-runner側で統一
 
 ### Agent Teams
 
