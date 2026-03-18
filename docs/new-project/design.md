@@ -45,6 +45,20 @@ Discordに送信
 - 独自の会話履歴（JSONLファイル）
 - 独自の設定（`config.json`）
 
+### グループ登録フロー
+
+`data/groups/{channel-name}/config.json`が存在するチャンネルのみ有効。
+
+- メッセージが来たらチャンネルIDで`config.json`の存在チェック
+- 未登録チャンネルは無視
+- 登録は手動でconfigファイルを作るか、mainグループのエージェントに依頼
+
+**参考**: `/Users/shin/src/github.com/shin902/nanoclaw/src/channels/discord.ts`（145行目）
+
+### トリガー
+
+全メッセージに反応（トリガーワード不要）。
+
 ### isMainフラグ
 
 NanoClawの設計を踏襲して残す。mainグループは：
@@ -55,7 +69,7 @@ NanoClawの設計を踏襲して残す。mainグループは：
 
 プライベートサーバーのため認可チェックは最小限でよい。
 
-**参考**: `nanoclaw/src/ipc.ts`
+**参考**: `/Users/shin/src/github.com/shin902/nanoclaw/src/ipc.ts`
 
 ---
 
@@ -216,7 +230,7 @@ NanoClawのGroupQueueをほぼ流用する。
 |---|---|
 | `/new` | セッションリセット（ホスト側でセッションIDをクリア） |
 | `/model` | プロバイダー切り替え（`config.json`を書き換え） |
-| `/compact` | 会話履歴の圧縮（SDK依存、要検討） |
+| `/compact` | opencode SDKの`session.summarize()`を呼ぶ（Claudeモード時は要検討） |
 
 ---
 
@@ -264,6 +278,6 @@ Claude SDKモード時はポートを使わないだけで問題ない。
 ## 未決定事項
 
 - [ ] プロジェクト名
-- [ ] `/compact`の実装方法（opencode SDK依存度による）
-- [ ] Credential Proxyが本当に不要か確認（SDK内部でAPI呼び出しする場合の挙動）
+- [ ] `/compact`：Claudeモード時の実装（opencode SDKは`session.summarize()`で解決済み）
+- [ ] Credential Proxyが本当に不要か確認（opencode SDK内部でAPI呼び出しする場合の挙動）
 - [ ] opencode SDK経由のMinimax等無料モデルの料金確認
