@@ -75,6 +75,12 @@ export async function processTaskIpc(
   switch (data.type) {
     case 'send_message':
       if (data.chatJid && data.text) {
+        if (data.chatJid !== sourceGroup) {
+          logger.warn(
+            `Unauthorized send_message attempt from group "${sourceGroup}" to "${data.chatJid}"`,
+          );
+          break;
+        }
         await deps.sendMessage(data.chatJid, data.text);
       }
       break;
