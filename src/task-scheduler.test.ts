@@ -85,4 +85,80 @@ describe('task scheduler', () => {
       new Date(scheduledTime).getTime() + 60000,
     );
   });
+
+  it('computeNextRun returns null for once tasks after their scheduled time', () => {
+    const now = new Date('2026-01-01T00:10:00.000Z');
+    vi.setSystemTime(now);
+
+    const scheduledTime = '2026-01-01T00:00:00.000Z';
+    const task = {
+      id: 'once-test',
+      group_folder: 'test',
+      chat_jid: 'test@g.us',
+      prompt: 'test once',
+      schedule_type: 'once' as const,
+      schedule_value: scheduledTime,
+      context_mode: 'isolated' as const,
+      next_run: scheduledTime,
+      last_run: null,
+      last_result: null,
+      status: 'active' as const,
+      created_at: '2025-12-31T23:00:00.000Z',
+    };
+
+    const nextRun = computeNextRun(task);
+    expect(nextRun).toBeNull();
+  });
+
+  it('computeNextRun skips missed intervals and schedules at the next aligned future time', () => {
+    const anchorTime = new Date('2026-01-01T00:00:00.000Z');
+    const now = new Date('2026-01-01T00:05:30.000Z');
+    vi.setSystemTime(now);
+
+    const task = {
+      id: 'missed-intervals-test',
+      group_folder: 'test',
+      chat_jid: 'test@g.us',
+      prompt: 'test intervals',
+      schedule_type: 'interval' as const,
+      schedule_value: '60000', // 1 minute
+      context_mode: 'isolated' as const,
+      next_run: anchorTime.toISOString(),
+      last_run: null,
+      last_result: null,
+      status: 'active' as const,
+      created_at: '2025-12-31T23:00:00.000Z',
+    };
+
+    const nextRun = computeNextRun(task);
+    expect(nextRun).not.toBeNull();
+    // Next aligned minute strictly after now (5m30s after anchor) is at 6 minutes.
+    expect(new Date(nextRun!).toISOString()).toBe(
+      new Date('2026-01-01T00:06:00.000Z').toISOString(),
+    );
+  });
+
+  it('computeNextRun preserves future next_run for interval tasks', () => {
+    const now = new Date('2026-01-01T00:05:00.000Z');
+    vi.setSystemTime(now);
+
+    const futureNextRun = new Date('2026-01-01T00:10:00.000Z').toISOString();
+    const task = {
+      id: 'future-alignment-test',
+      group_folder: 'test',
+      chat_jid: 'test@g.us',
+      prompt: 'test future alignment',
+      schedule_type: 'interval' as const,
+      schedule_value: '60000',
+      context_mode: 'isolated' as const,
+      next_run: futureNextRun,
+      last_run: null,
+      last_result: null,
+      status: 'active' as const,
+      created_at: '2025-12-31T23:00:00.000Z',
+    };
+
+    const nextRun = computeNextRun(task);
+    expect(nextRun).toBe(futureNextRun);
+  });
 });
