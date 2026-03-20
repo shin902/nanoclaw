@@ -155,9 +155,18 @@ export function listRegisteredGroups(): StoredGroupConfig[] {
 
 export function loadActiveTasks(): ScheduledTask[] {
   if (!fs.existsSync(ACTIVE_TASKS_PATH)) return [];
-  return JSON.parse(
-    fs.readFileSync(ACTIVE_TASKS_PATH, 'utf-8'),
-  ) as ScheduledTask[];
+  try {
+    const raw = fs.readFileSync(ACTIVE_TASKS_PATH, 'utf-8');
+    if (raw.trim() === '') return [];
+    return JSON.parse(raw) as ScheduledTask[];
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // Fall back to an empty task list if the active tasks file is unreadable or invalid.
+    logger.warn(
+      `Failed to load active tasks from "${ACTIVE_TASKS_PATH}": ${message}`,
+    );
+    return [];
+  }
 }
 
 export function saveActiveTasks(tasks: ScheduledTask[]): void {
