@@ -118,9 +118,27 @@ export function loadGroupConfig(groupFolder: string): StoredGroupConfig | null {
   const filePath = groupConfigPath(groupFolder);
   if (!fs.existsSync(filePath)) return null;
 
-  const parsed = JSON.parse(
-    fs.readFileSync(filePath, 'utf-8'),
-  ) as Partial<StoredGroupConfig>;
+  let raw: string;
+  try {
+    raw = fs.readFileSync(filePath, 'utf-8');
+  } catch (err) {
+    logger.error(
+      `Failed to read group config for "${groupFolder}" at "${filePath}":`,
+      err,
+    );
+    return null;
+  }
+
+  let parsed: Partial<StoredGroupConfig>;
+  try {
+    parsed = JSON.parse(raw) as Partial<StoredGroupConfig>;
+  } catch (err) {
+    logger.error(
+      `Failed to parse JSON group config for "${groupFolder}" at "${filePath}":`,
+      err,
+    );
+    return null;
+  }
   return {
     jid: parsed.jid || '',
     name: parsed.name || groupFolder,
