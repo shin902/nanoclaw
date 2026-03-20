@@ -81,6 +81,7 @@ export async function processTaskIpc(
 
     case 'update_config':
       if (!data.groupFolder) break;
+      if (data.groupFolder !== sourceGroup) break;
       const config = loadGroupConfig(data.groupFolder);
       if (!config) break;
       saveGroupConfig(data.groupFolder, {
