@@ -201,7 +201,7 @@ export class DiscordChannel implements Channel {
         await (channel as TextChannel).sendTyping();
       }
     } catch (error) {
-      logger.debug('Discord: failed to send typing indicator', { jid, error });
+      logger.debug({ jid, error }, 'Discord: failed to send typing indicator');
     }
   }
 }
