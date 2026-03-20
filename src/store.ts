@@ -124,7 +124,7 @@ export function loadGroupConfig(groupFolder: string): StoredGroupConfig | null {
   return {
     jid: parsed.jid || '',
     name: parsed.name || groupFolder,
-    folder: parsed.folder || groupFolder,
+    folder: groupFolder,
     model: parsed.model || DEFAULT_MODEL,
     provider: parsed.provider || DEFAULT_PROVIDER,
     sessionId: parsed.sessionId,
