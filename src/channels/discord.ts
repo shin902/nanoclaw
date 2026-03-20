@@ -167,13 +167,17 @@ export class DiscordChannel implements Channel {
   async sendMessage(jid: string, text: string): Promise<void> {
     if (!this.client) return;
 
-    const channel = await this.client.channels.fetch(jid.replace(/^dc:/, ''));
-    if (!channel || !('send' in channel)) return;
+    try {
+      const channel = await this.client.channels.fetch(jid.replace(/^dc:/, ''));
+      if (!channel || !('send' in channel)) return;
 
-    const textChannel = channel as TextChannel;
-    const maxLength = 2000;
-    for (let index = 0; index < text.length; index += maxLength) {
-      await textChannel.send(text.slice(index, index + maxLength));
+      const textChannel = channel as TextChannel;
+      const maxLength = 2000;
+      for (let index = 0; index < text.length; index += maxLength) {
+        await textChannel.send(text.slice(index, index + maxLength));
+      }
+    } catch (err) {
+      logger.error({ err, jid }, 'Failed to send Discord message');
     }
   }
 
@@ -194,9 +198,13 @@ export class DiscordChannel implements Channel {
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
     if (!this.client || !isTyping) return;
-    const channel = await this.client.channels.fetch(jid.replace(/^dc:/, ''));
-    if (channel && 'sendTyping' in channel) {
-      await (channel as TextChannel).sendTyping();
+    try {
+      const channel = await this.client.channels.fetch(jid.replace(/^dc:/, ''));
+      if (channel && 'sendTyping' in channel) {
+        await (channel as TextChannel).sendTyping();
+      }
+    } catch (err) {
+      logger.warn({ err, jid }, 'Failed to send Discord typing indicator');
     }
   }
 }
