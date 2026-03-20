@@ -91,6 +91,11 @@ function buildVolumeMounts(group: RegisteredGroup): VolumeMount[] {
     containerPath: '/home/node/.claude/projects',
     readonly: false,
   });
+  mounts.push({
+    hostPath: skillsDst,
+    containerPath: '/home/node/.claude/skills',
+    readonly: false,
+  });
 
   // グループごとの IPC ネームスペース: 各グループは独自の IPC ディレクトリを持ちます
   // これにより、IPC を介したグループを跨ぐ権限昇格を防ぎます
