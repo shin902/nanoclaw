@@ -19,7 +19,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
-import { ScheduledTask, StoredGroupConfig } from './types.js';
+import { ScheduledTask } from './types.js';
 
 /**
  * 定期実行タスクの次回の実行時間を計算します。
