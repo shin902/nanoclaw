@@ -194,9 +194,14 @@ export class DiscordChannel implements Channel {
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
     if (!this.client || !isTyping) return;
-    const channel = await this.client.channels.fetch(jid.replace(/^dc:/, ''));
-    if (channel && 'sendTyping' in channel) {
-      await (channel as TextChannel).sendTyping();
+
+    try {
+      const channel = await this.client.channels.fetch(jid.replace(/^dc:/, ''));
+      if (channel && 'sendTyping' in channel) {
+        await (channel as TextChannel).sendTyping();
+      }
+    } catch (error) {
+      logger.debug('Discord: failed to send typing indicator', { jid, error });
     }
   }
 }
