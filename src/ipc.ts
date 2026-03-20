@@ -151,19 +151,36 @@ export async function processTaskIpc(
           task.schedule_type;
         const nextScheduleValue = data.schedule_value || task.schedule_value;
 
-        updateTask(data.taskId, {
-          prompt: data.prompt,
-          schedule_type: data.schedule_type as ScheduledTask['schedule_type'],
-          schedule_value: data.schedule_value,
-          context_mode:
-            data.context_mode === 'group' || data.context_mode === 'isolated'
-              ? data.context_mode
-              : undefined,
-          next_run:
-            data.schedule_type || data.schedule_value
-              ? computeNextRun(nextScheduleType, nextScheduleValue)
-              : undefined,
-        });
+        const updates: Partial<ScheduledTask> = {};
+
+        if (typeof data.prompt === 'string') {
+          updates.prompt = data.prompt;
+        }
+
+        if (data.schedule_type) {
+          updates.schedule_type =
+            data.schedule_type as ScheduledTask['schedule_type'];
+        }
+
+        if (data.schedule_value) {
+          updates.schedule_value = data.schedule_value;
+        }
+
+        if (
+          data.context_mode === 'group' ||
+          data.context_mode === 'isolated'
+        ) {
+          updates.context_mode = data.context_mode;
+        }
+
+        if (data.schedule_type || data.schedule_value) {
+          updates.next_run = computeNextRun(
+            nextScheduleType,
+            nextScheduleValue,
+          );
+        }
+
+        updateTask(data.taskId, updates);
       }
       break;
 
