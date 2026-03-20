@@ -25,7 +25,7 @@ import {
   saveGroupConfig,
 } from './store.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { Channel, GroupEvent, NewMessage, StoredGroupConfig } from './types.js';
+import { Channel, NewMessage, StoredGroupConfig } from './types.js';
 
 export { escapeXml, formatMessages } from './router.js';
 
