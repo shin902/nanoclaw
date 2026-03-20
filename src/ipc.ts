@@ -98,20 +98,24 @@ export async function processTaskIpc(
       deps.writeGroupsSnapshot(sourceGroup, deps.getAvailableGroups());
       break;
 
-    case 'schedule_task':
+    case 'schedule_task': {
+      const groupConfig = loadGroupConfig(sourceGroup);
       if (
         data.prompt &&
         data.schedule_type &&
         data.schedule_value &&
         data.targetJid &&
-        data.groupFolder
+        data.groupFolder &&
+        data.groupFolder === sourceGroup &&
+        groupConfig &&
+        data.targetJid === groupConfig.jid
       ) {
         const task: ScheduledTask = {
           id:
             data.taskId ||
             `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          group_folder: data.groupFolder,
-          chat_jid: data.targetJid,
+          group_folder: sourceGroup,
+          chat_jid: groupConfig.jid,
           prompt: data.prompt,
           schedule_type: data.schedule_type as 'cron' | 'interval' | 'once',
           schedule_value: data.schedule_value,
@@ -128,6 +132,7 @@ export async function processTaskIpc(
         upsertTask(task);
       }
       break;
+    }
 
     case 'pause_task':
       if (data.taskId) updateTask(data.taskId, { status: 'paused' });
