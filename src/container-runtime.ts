@@ -1,4 +1,6 @@
 import { execSync } from 'child_process';
+import fs from 'fs';
+import os from 'os';
 
 import { logger } from './logger.js';
 
@@ -9,11 +11,30 @@ export const CONTAINER_RUNTIME_BIN = 'docker';
 export const CONTAINER_HOST_GATEWAY = 'host.docker.internal';
 
 export const PROXY_BIND_HOST =
-  process.env.CREDENTIAL_PROXY_HOST || '172.17.0.1';
+  process.env.CREDENTIAL_PROXY_HOST || detectProxyBindHost();
+
+function detectProxyBindHost(): string {
+  if (os.platform() === 'darwin') return '127.0.0.1';
+
+  // WSL は Docker Desktop を使うため、macOS と同じく loopback を使う。
+  if (fs.existsSync('/proc/sys/fs/binfmt_misc/WSLInterop')) return '127.0.0.1';
+
+  const ifaces = os.networkInterfaces();
+  const docker0 = ifaces['docker0'];
+  if (docker0) {
+    const ipv4 = docker0.find((addr) => addr.family === 'IPv4');
+    if (ipv4) return ipv4.address;
+  }
+
+  return '0.0.0.0';
+}
 
 /** コンテナがホストゲートウェイを解決するために必要な CLI 引数。 */
 export function hostGatewayArgs(): string[] {
-  return ['--add-host=host.docker.internal:host-gateway'];
+  if (os.platform() === 'linux') {
+    return ['--add-host=host.docker.internal:host-gateway'];
+  }
+  return [];
 }
 
 /** 読み取り専用バインドマウント用の CLI 引数を返します。 */
