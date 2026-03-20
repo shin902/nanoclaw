@@ -192,6 +192,39 @@ export async function processTaskIpc(
   }
 }
 
+
+function quarantineOrDeleteIpcFile(
+  dirPath: string,
+  file: string,
+  filePath: string,
+): void {
+  try {
+    const errorsDir = path.join(dirPath, 'errors');
+    fs.mkdirSync(errorsDir, { recursive: true });
+    const errorPath = path.join(errorsDir, file);
+    fs.renameSync(filePath, errorPath);
+    logger.info(
+      { filePath, errorPath },
+      'Moved failed IPC file to errors directory',
+    );
+  } catch (moveErr) {
+    logger.error(
+      { filePath, moveErr },
+      'Failed to move bad IPC file, deleting instead',
+    );
+    try {
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    } catch (unlinkErr) {
+      logger.error(
+        { filePath, unlinkErr },
+        'Failed to delete bad IPC file after move failure',
+      );
+    }
+  }
+}
+
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
     logger.debug('IPC watcher already running, skipping duplicate start');
@@ -237,81 +270,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
             fs.unlinkSync(filePath);
           } catch (err) {
             logger.error({ filePath, err }, 'Error processing IPC file');
-            try {
-              const errorsDir = path.join(dirPath, 'errors');
-              fs.mkdirSync(errorsDir, { recursive: true });
-              const errorPath = path.join(errorsDir, file);
-              fs.renameSync(filePath, errorPath);
-              logger.info(
-                { filePath, errorPath },
-                'Moved failed IPC file to errors directory',
-              );
-            } catch (moveErr) {
-              logger.error(
-                { filePath, moveErr },
-                'Failed to move bad IPC file, deleting instead',
-              );
-              try {
-                if (fs.existsSync(filePath)) {
-                  fs.unlinkSync(filePath);
-                }
-              } catch (unlinkErr) {
-                logger.error(
-                  { filePath, unlinkErr },
-                  'Failed to delete bad IPC file after move failure',
-                );
-              }
-            }
-            try {
-              const errorsDir = path.join(dirPath, 'errors');
-              fs.mkdirSync(errorsDir, { recursive: true });
-              const errorPath = path.join(errorsDir, file);
-              fs.renameSync(filePath, errorPath);
-              logger.info(
-                { filePath, errorPath },
-                'Moved failed IPC file to errors directory',
-              );
-            } catch (moveErr) {
-              logger.error(
-                { filePath, moveErr },
-                'Failed to move bad IPC file, deleting instead',
-              );
-              try {
-                if (fs.existsSync(filePath)) {
-                  fs.unlinkSync(filePath);
-                }
-              } catch (unlinkErr) {
-                logger.error(
-                  { filePath, unlinkErr },
-                  'Failed to delete bad IPC file after move failure',
-                );
-              }
-            }
-            try {
-              const errorsDir = path.join(dirPath, 'errors');
-              fs.mkdirSync(errorsDir, { recursive: true });
-              const errorPath = path.join(errorsDir, file);
-              fs.renameSync(filePath, errorPath);
-              logger.info(
-                { filePath, errorPath },
-                'Moved failed IPC file to errors directory',
-              );
-            } catch (moveErr) {
-              logger.error(
-                { filePath, moveErr },
-                'Failed to move bad IPC file, deleting instead',
-              );
-              try {
-                if (fs.existsSync(filePath)) {
-                  fs.unlinkSync(filePath);
-                }
-              } catch (unlinkErr) {
-                logger.error(
-                  { filePath, unlinkErr },
-                  'Failed to delete bad IPC file after move failure',
-                );
-              }
-            }
+            quarantineOrDeleteIpcFile(dirPath, file, filePath);
           }
         }
       }
