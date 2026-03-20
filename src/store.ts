@@ -161,8 +161,7 @@ export function loadActiveTasks(): ScheduledTask[] {
     if (raw.trim() === '') return [];
     return JSON.parse(raw) as ScheduledTask[];
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : String(err);
+    const message = err instanceof Error ? err.message : String(err);
     // Fall back to an empty task list if the active tasks file is unreadable or invalid.
     logger.warn?.(
       `Failed to load active tasks from "${ACTIVE_TASKS_PATH}": ${message}`,

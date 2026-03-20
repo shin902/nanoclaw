@@ -166,10 +166,7 @@ export async function processTaskIpc(
           updates.schedule_value = data.schedule_value;
         }
 
-        if (
-          data.context_mode === 'group' ||
-          data.context_mode === 'isolated'
-        ) {
+        if (data.context_mode === 'group' || data.context_mode === 'isolated') {
           updates.context_mode = data.context_mode;
         }
 
